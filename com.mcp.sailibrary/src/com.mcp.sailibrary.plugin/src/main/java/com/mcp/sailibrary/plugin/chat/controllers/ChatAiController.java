@@ -132,19 +132,13 @@ public class ChatAiController {
  * @author Renato Tomaz Nati
  * @since 2026-05-18
  */
+    /** * Atualiza o contexto corrente do controlador com base no estado atual do * editor e da selecao. * * <p>Este metodo sincroniza o estado interno do alvo operacional, reaplica * vinculos e highlights de blocos nomeados quando houver editor valido, * atualiza o resumo exibido na view e emite um eco inicial do alvo quando * houver contexto textual suficiente.</p> * * <p>Quando o alvo muda, o controlador limpa destaque anterior, invalida a * missao corrente e reseta a memoria recente de sessao para evitar mistura de * contexto entre alvos diferentes.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public void setContext(String selectedCode, String fullFileText, String apiKey, IDocument document, ITextSelection selection, ICompilationUnit compUnit, ITextEditor textEditor) {
-        boolean mudouAlvo = false;
 
-        if (this.document != document || this.selection == null || this.selection.getOffset() != selection.getOffset() || this.selection.getLength() != selection.getLength()) {
-            mudouAlvo = true;
-        }
+        boolean mudouAlvo = detectarMudancaDeAlvo(document, selection);
 
         if (mudouAlvo) {
-            removerDestaque();
-            this.primeiroEco = true;
-            this.missaoCancelada = true;
-            this.tokenMissaoAtual++;
-            sessionHistoryService.limpar();
+            prepararTrocaDeAlvo();
         }
 
         this.selectedCode = selectedCode;
@@ -154,59 +148,170 @@ public class ChatAiController {
         this.selection = selection;
         this.compUnit = compUnit;
         this.textEditor = textEditor;
-        try {
-            if (this.document != null && this.compUnit != null && this.compUnit.getResource() != null
-                    && this.compUnit.getResource().getLocation() != null && this.textEditor != null) {
-                String currentFilePath = this.compUnit.getResource().getLocation().toFile().getAbsolutePath().replace("\\", "/");
-                namedBlockDocumentBindingService.bindBlocksToDocument(this.document, namedBlockSessionService.getAll(), currentFilePath);
-                namedBlockDocumentBindingService.syncBlocksFromDocument(this.document, namedBlockSessionService.getAll(), currentFilePath);
-                namedBlockHighlighter.refreshHighlights(this.textEditor, namedBlockSessionService.getAll(), currentFilePath);
+
+        sincronizarBlocosNomeadosComContextoAtual();
+
+        if (mudouAlvo && possuiSelecaoTextualValida(selection)) {
+            if (deveAplicarDestaqueOperacional()) {
+                aplicarDestaque();
             }
-        } catch (Exception e) {
-        }
-        if (mudouAlvo && selection.getLength() > 0 && deveAplicarDestaqueOperacional()) {
-            aplicarDestaque();
         }
 
         atualizarResumoAlvoNaView();
+        emitirEcoInicialDoAlvoSeNecessario();
+    }
+    /** * Verifica se houve mudanca relevante de alvo operacional entre o contexto * anterior e o novo contexto informado. * * <p>A comparacao considera documento, offset e comprimento da selecao. Quando * nao houver selecao nova valida, o metodo considera que nao ha base segura * para comparacao de range textual.</p> * * @param novoDocumento documento atual informado * @param novaSelecao selecao atual informada * @return true quando houver mudanca relevante de alvo * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private boolean detectarMudancaDeAlvo(IDocument novoDocumento, ITextSelection novaSelecao) {
+        if (this.document != novoDocumento) {
+            return true;
+        }
 
-        if (this.primeiroEco) {
-            try {
-                int startLine = selection.getStartLine() + 1;
-                int startLineOffset = document.getLineOffset(selection.getStartLine());
-                int startCol = selection.getOffset() - startLineOffset + 1;
+        if (this.selection == null && novaSelecao != null) {
+            return true;
+        }
 
-                int endLine = selection.getEndLine() + 1;
-                int endLineOffset = document.getLineOffset(selection.getEndLine());
-                int endCol = (selection.getOffset() + selection.getLength()) - endLineOffset + 1;
+        if (this.selection != null && novaSelecao == null) {
+            return true;
+        }
 
-                String nomeClasse = compUnit != null ? compUnit.getElementName() : "Desconhecida";
-                NamedCodeBlock blocoPrincipalAtivo = resolverBlocoPrincipalAtivo();
+        if (this.selection == null || novaSelecao == null) {
+            return false;
+        }
 
-                String eco = "Alvo escolhido: Classe [" + nomeClasse + "] "
-                        + "| Linha " + startLine + " Col " + startCol + " ate Linha " + endLine + " Col " + endCol
-                        + System.lineSeparator() + "Trecho em foco:" + System.lineSeparator() + this.selectedCode;
+        if (this.selection.getOffset() != novaSelecao.getOffset()) {
+            return true;
+        }
 
-                if (blocoPrincipalAtivo != null) {
-                    eco += System.lineSeparator()
-                            + "Alvo principal da analise: "
-                            + blocoPrincipalAtivo.getName()
-                            + " ["
-                            + blocoPrincipalAtivo.getFileName()
-                            + ":"
-                            + blocoPrincipalAtivo.getStartLine()
-                            + "-"
-                            + blocoPrincipalAtivo.getEndLine()
-                            + "]";
-                }
+        if (this.selection.getLength() != novaSelecao.getLength()) {
+            return true;
+        }
 
-                view.adicionarMensagem("Sistema", eco);
-                atualizarStatusNaView("Alvo obtido e pronto para analise");
-            } catch (Exception e) {
-                view.adicionarMensagem("Sistema", "Alvo obtido. Falha anotada.");
-                atualizarStatusNaView("Alvo escolhido com informacao parcial");
+        return false;
+    }
+    /** * Prepara o controlador para uma troca de alvo operacional. * * <p>Este metodo remove destaque visual anterior, invalida a missao em curso, * avanca o token interno de controle e limpa a memoria recente da sessao para * evitar contaminacao entre alvos diferentes.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private void prepararTrocaDeAlvo() {
+        removerDestaque();
+        this.primeiroEco = true;
+        this.missaoCancelada = true;
+        this.tokenMissaoAtual++;
+        sessionHistoryService.limpar();
+    }
+    /** * Retorna true quando a selecao textual informada existe e possui comprimento * maior que zero. * * @param selecao selecao textual a validar * @return true quando a selecao puder ser tratada como alvo textual * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private boolean possuiSelecaoTextualValida(ITextSelection selecao) {
+        return selecao != null && selecao.getLength() > 0;
+    }
+    /** * Sincroniza vinculos e highlights de blocos nomeados com o contexto atual do * editor, quando houver dados suficientes. * * <p>Falhas isoladas nessa etapa nao devem interromper o fluxo principal de * atualizacao do contexto.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private void sincronizarBlocosNomeadosComContextoAtual() {
+        try {
+            if (this.document == null || this.compUnit == null || this.textEditor == null) {
+                return;
+            }
+
+            if (this.compUnit.getResource() == null || this.compUnit.getResource().getLocation() == null) {
+                return;
+            }
+
+            String currentFilePath = this.compUnit.getResource()
+                    .getLocation()
+                    .toFile()
+                    .getAbsolutePath()
+                    .replace("\\", "/");
+
+            namedBlockDocumentBindingService.bindBlocksToDocument(
+                    this.document,
+                    namedBlockSessionService.getAll(),
+                    currentFilePath
+            );
+
+            namedBlockDocumentBindingService.syncBlocksFromDocument(
+                    this.document,
+                    namedBlockSessionService.getAll(),
+                    currentFilePath
+            );
+
+            namedBlockHighlighter.refreshHighlights(
+                    this.textEditor,
+                    namedBlockSessionService.getAll(),
+                    currentFilePath
+            );
+        } catch (Exception e) {
+            // Falha silenciosa segura para nao interromper a atualizacao do contexto.
+        }
+    }
+    /** * Emite uma mensagem inicial de eco do alvo atual quando houver contexto * textual suficiente e a flag de primeiro eco ainda estiver ativa. * * <p>O objetivo e dar visibilidade imediata ao alvo travado sem repetir a * mensagem indefinidamente em toda sincronizacao subsequente do mesmo alvo.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private void emitirEcoInicialDoAlvoSeNecessario() {
+        if (!primeiroEco) {
+            return;
+        }
+
+        if (document == null || selection == null || compUnit == null) {
+            return;
+        }
+
+        try {
+            int startLine = selection.getStartLine() + 1;
+            int startLineOffset = document.getLineOffset(selection.getStartLine());
+            int startCol = selection.getOffset() - startLineOffset + 1;
+
+            int endLine = selection.getEndLine() + 1;
+            int endLineOffset = document.getLineOffset(selection.getEndLine());
+            int endCol = (selection.getOffset() + selection.getLength()) - endLineOffset + 1;
+
+            String nomeClasse = compUnit.getElementName();
+            NamedCodeBlock blocoPrincipalAtivo = resolverBlocoPrincipalAtivo();
+
+            String eco = "Alvo escolhido: Classe [" + nomeClasse + "] "
+                    + "| Linha " + startLine + " Col " + startCol
+                    + " ate Linha " + endLine + " Col " + endCol;
+
+            if (selectedCode != null && selectedCode.trim().length() > 0) {
+                eco += System.lineSeparator()
+                        + "Trecho em foco:"
+                        + System.lineSeparator()
+                        + selectedCode;
+            }
+
+            if (blocoPrincipalAtivo != null) {
+                eco += System.lineSeparator()
+                        + "Alvo principal da analise: "
+                        + blocoPrincipalAtivo.getName()
+                        + " ["
+                        + blocoPrincipalAtivo.getFileName()
+                        + ":"
+                        + blocoPrincipalAtivo.getStartLine()
+                        + "-"
+                        + blocoPrincipalAtivo.getEndLine()
+                        + "]";
+            }
+
+            view.adicionarMensagem("Sistema", eco);
+            atualizarStatusNaView("Alvo obtido e pronto para analise");
+            this.primeiroEco = false;
+        } catch (Exception e) {
+            view.adicionarMensagem("Sistema", "Alvo obtido. Falha anotada.");
+            atualizarStatusNaView("Alvo escolhido com informacao parcial");
+            this.primeiroEco = false;
+        }
+    }
+    /** * Verifica se a sessao atual possui contexto estrutural suficiente para * permitir uma missao sem selecao textual ativa no editor. * * <p>Esse metodo atende cenarios em que a IA precisa criar arquivos ou * packages em alvos estruturais nomeados, mesmo quando nao existe um trecho * selecionado no editor.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private boolean possuiContextoEstruturalUtilizavel() {
+        if (namedStructuralContextSessionService == null) {
+            return false;
+        }
+
+        java.util.List<NamedStructuralContext> contexts = namedStructuralContextSessionService.getAll();
+        if (contexts == null || contexts.isEmpty()) {
+            return false;
+        }
+
+        for (int i = 0; i < contexts.size(); i++) {
+            NamedStructuralContext context = contexts.get(i);
+            if (context != null && context.isUsable()) {
+                return true;
             }
         }
+
+        return false;
     }
     /** * Decide se o destaque operacional do alvo atual deve ser aplicado no editor. * * <p>Quando existe um PRIMARY ativo na sessao, o destaque visual principal deve * ficar a cargo do sistema de blocos nomeados, preservando apenas a pintura * semantica ja existente no editor e evitando sobreposicao com o destaque * operacional do chat.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private boolean deveAplicarDestaqueOperacional() {
@@ -601,15 +706,15 @@ public class ChatAiController {
  * @since 2026-05-18
  */
     public void executarMissaoIA(final String instrucao, final int profundidadeMax, final String pedidoOriginal) {
-    	if (document == null || selection == null) {
-    	    sincronizarAlvoPrimarioGlobal();
-    	}
+        if (document == null || selection == null) {
+            sincronizarAlvoPrimarioGlobal();
+        }
 
-    	if (document == null || selection == null) {
-    	    view.adicionarMensagem("Sistema", "Erro operacional: Nenhum documento ou selecao ativa. Defina um PRIMARY valido ou sincronize a selecao atual.");
-    	    atualizarStatusNaView("Nenhum alvo operacional ativo");
-    	    return;
-    	}
+        if ((document == null || selection == null) && !possuiContextoEstruturalUtilizavel()) {
+            view.adicionarMensagem("Sistema", "Erro operacional: Nenhum documento, selecao ou contexto estrutural utilizavel foi encontrado. Defina um PRIMARY valido, selecione um trecho ou use um contexto estrutural nomeado adequado.");
+            atualizarStatusNaView("Nenhum alvo operacional ativo");
+            return;
+        }
 
         this.missaoCancelada = false;
         this.tokenMissaoAtual++;
@@ -1370,6 +1475,7 @@ public class ChatAiController {
  * @since 2026-05-18
  */
     /** * Atualiza o resumo do alvo na view de conversa de forma compacta. * * <p>O resumo nao deve exibir preview textual da selecao ativa. Para alvo * estrutural de arquivo, a exibicao deve indicar que o escopo e o arquivo * inteiro, sem simular uma selecao de linhas.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Atualiza o resumo do alvo na view de conversa de forma compacta. * * <p>O resumo nao deve exibir preview textual da selecao ativa. Para alvo * estrutural de arquivo, a exibicao deve indicar que o escopo e o arquivo * inteiro, sem simular uma selecao de linhas.</p> * * <p>Quando nao houver alvo textual ou arquivo estrutural principal ativo, mas * houver contextos estruturais utilizaveis na sessao, a view deve refletir * isso para evitar a falsa impressao de ausencia total de contexto.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private void atualizarResumoAlvoNaView() {
         if (view == null) {
             return;
@@ -1425,9 +1531,51 @@ public class ChatAiController {
                   .append(" | ")
                   .append(contextoPrincipal.getRelativePath() != null ? contextoPrincipal.getRelativePath() : "")
                   .append("]");
+
+            view.atualizarResumoAlvo(resumo.toString());
+            return;
         }
 
-        view.atualizarResumoAlvo(resumo.toString());
+        if (possuiContextoEstruturalUtilizavel()) {
+            java.util.List<NamedStructuralContext> contexts = namedStructuralContextSessionService.getAll();
+
+            resumo = new StringBuilder();
+            resumo.append("Contexto estrutural ativo").append(System.lineSeparator());
+
+            int adicionados = 0;
+            for (int i = 0; i < contexts.size(); i++) {
+                NamedStructuralContext context = contexts.get(i);
+                if (context == null || !context.isUsable()) {
+                    continue;
+                }
+
+                resumo.append("- ")
+                      .append(context.getName())
+                      .append(" [")
+                      .append(context.getRole() != null ? context.getRole().name() : "")
+                      .append(" | ")
+                      .append(context.getType() != null ? context.getType().name() : "")
+                      .append("]");
+
+                if (context.getRelativePath() != null && context.getRelativePath().trim().length() > 0) {
+                    resumo.append(" -> ").append(context.getRelativePath());
+                } else if (context.getFileName() != null && context.getFileName().trim().length() > 0) {
+                    resumo.append(" -> ").append(context.getFileName());
+                }
+
+                resumo.append(System.lineSeparator());
+                adicionados++;
+
+                if (adicionados >= 4) {
+                    break;
+                }
+            }
+
+            view.atualizarResumoAlvo(resumo.toString().trim());
+            return;
+        }
+
+        view.atualizarResumoAlvo("Nenhum alvo ativo");
     }
     /**
  * Atualiza o status operacional da view de forma segura.

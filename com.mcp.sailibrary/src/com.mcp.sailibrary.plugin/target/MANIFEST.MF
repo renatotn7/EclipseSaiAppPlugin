@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: SAI Library MCP Plugin
 Bundle-SymbolicName: com.mcp.sailibrary.plugin;singleton:=true
-Bundle-Version: 1.0.0.202605212301
+Bundle-Version: 1.0.0.202605221246
 Bundle-Activator: com.mcp.sailibrary.plugin.Activator
 Bundle-Vendor: SaiLibraryMCPPlugin
 Require-Bundle: org.eclipse.ui,org.eclipse.ui.ide,org.eclipse.ui.navigat
@@ -16,6 +16,7 @@ Require-Bundle: org.eclipse.ui,org.eclipse.ui.ide,org.eclipse.ui.navigat
  ntime;resolution:=optional
 Automatic-Module-Name: com.mcp.sailibrary.plugin
 Bundle-ActivationPolicy: lazy
-Bundle-ClassPath: ., lib/gson-2.14.0.jar, lib/vineflower-1.12.0.jar
+Bundle-ClassPath: ., lib/gson-2.14.0.jar, lib/vineflower-1.12.0.jar, lib
+ /org.eclipse.jgit-7.4.jar
 Require-Capability: osgi.ee;filter:="(&(osgi.ee=JavaSE)(version=21))"
 
