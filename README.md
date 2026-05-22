@@ -1,5 +1,7 @@
 # SAI App - Chat IA para Eclipse
-Um poderoso agente de IA para projetos Java
+
+Um poderoso agente de IA para projetos Java 🚀
+
 Plugin de assistencia de engenharia de software para Eclipse, com foco em:
 
 - analise de codigo orientada por contexto
@@ -11,7 +13,40 @@ Plugin de assistencia de engenharia de software para Eclipse, com foco em:
 
 ---
 
-# Visao geral
+## 📋 Pré-requisitos
+
+- Eclipse IDE (4.13+)
+- Java Development Kit (JDK 11+)
+- Eclipse Plugin Development Environment (PDE)
+- Maven (opcional, para build)
+
+---
+
+## ⚙️ Instalação
+
+### 1. Clonar o repositório
+
+```bash
+git clone https://github.com/renatotn7/EclipseSaiAppPlugin.git
+cd EclipseSaiAppPlugin
+```
+
+### 2. Importar no Eclipse
+
+- Abra Eclipse IDE
+- File → Import → Existing Projects into Workspace
+- Selecione a pasta do projeto
+- Aguarde a compilação automática
+
+### 3. Executar como Plugin Eclipse
+
+- Clique com o botão direito no projeto
+- Run As → Eclipse Application
+- Uma nova instância do Eclipse será aberta com o plugin carregado
+
+---
+
+# Visão geral
 
 O SAI App integra uma IA ao Eclipse para ajudar em tarefas como:
 
@@ -99,9 +134,9 @@ O sistema distingue entre:
 - um unico `PRIMARY` por vez
 - o `PRIMARY` representa o alvo principal da conversa
 - o `PRIMARY` pode ser:
-- um bloco textual
-- um arquivo estrutural
-- package e pasta podem ser editaveis ou referenciais, mas nao sao alvo principal operacional de edicao direta
+  - um bloco textual
+  - um arquivo estrutural
+  - package e pasta podem ser editaveis ou referenciais, mas nao sao alvo principal operacional de edicao direta
 
 ---
 
@@ -117,9 +152,9 @@ No editor:
 
 - selecione um trecho de codigo
 - use o menu rapido ou a aba de contexto para adicionar como:
-- Principal
-- Editavel
-- Referencial
+  - Principal
+  - Editavel
+  - Referencial
 
 ## Selecionar contexto estrutural
 
@@ -128,9 +163,9 @@ No Project Explorer ou Package Explorer:
 - selecione arquivo, package ou pasta
 - use o menu contextual
 - adicione como:
-- Principal
-- Editavel
-- Referencial
+  - Principal
+  - Editavel
+  - Referencial
 
 ## Conversar com a IA
 
@@ -262,18 +297,20 @@ sem interferir diretamente no repositorio Git oficial do projeto do usuario.
 
 Exemplo simplificado:
 
-`~/.sai/`
-`└── projects/`
-` └── <projectKey>/`
-` ├── branch_context.json`
-` ├── dependency_snapshot.json`
-` ├── discovered_patterns.json`
-` ├── project_memory.json`
-` ├── tool_history.json`
-` ├── mutation_journal.json`
-` ├── mutation_state.json`
-` ├── mutation_repo_meta.json`
-` └── workspace_git/`
+```
+~/.sai/
+└── projects/
+    └── <projectKey>/
+        ├── branch_context.json
+        ├── dependency_snapshot.json
+        ├── discovered_patterns.json
+        ├── project_memory.json
+        ├── tool_history.json
+        ├── mutation_journal.json
+        ├── mutation_state.json
+        ├── mutation_repo_meta.json
+        └── workspace_git/
+```
 
 ---
 
@@ -430,23 +467,25 @@ Infraestrutura para:
 
 Exemplo de organizacao sugerida:
 
-`com.mcp.sailibrary.plugin.agent`
-`├── AgentTool.java`
-`├── orchestration`
-`├── context`
-`│ ├── analise`
-`│ └── mutation`
-`│ ├── model`
-`│ └── diff`
-`└── tools`
-` ├── exploration`
-` ├── jdt`
-` ├── architecture`
-` ├── memory`
-` ├── mutation`
-` ├── mutation.history`
-` ├── bytecode`
-` └── support`
+```
+com.mcp.sailibrary.plugin.agent
+├── AgentTool.java
+├── orchestration
+├── context
+│   ├── analise
+│   └── mutation
+│       ├── model
+│       └── diff
+└── tools
+    ├── exploration
+    ├── jdt
+    ├── architecture
+    ├── memory
+    ├── mutation
+    ├── mutation.history
+    ├── bytecode
+    └── support
+```
 
 ---
 
@@ -454,10 +493,12 @@ Exemplo de organizacao sugerida:
 
 As tools seguem o contrato basico:
 
-`public interface AgentTool {`
-` String getName();`
-` String execute(String jsonParameters);`
-`}`
+```java
+public interface AgentTool {
+    String getName();
+    String execute(String jsonParameters);
+}
+```
 
 Ferramentas que tambem documentam seu comportamento para o prompt implementam:
 
@@ -591,3 +632,38 @@ A ideia central e simples:
 **nao adivinhar, investigar.**
 **nao alterar cegamente, alterar com contexto.**
 **nao perder controle, manter historico e restauracao.**
+
+---
+
+## 🤝 Contribuindo
+
+Contribuições são bem-vindas! Por favor:
+
+1. Faça um Fork do projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
+
+---
+
+## 📄 Licença
+
+Este projeto está disponível sob licença MIT. Consulte o arquivo LICENSE para mais detalhes.
+
+---
+
+## 👤 Autor
+
+**renatotn7** - [@renatotn7](https://github.com/renatotn7)
+
+---
+
+## 💬 Suporte
+
+Para dúvidas, problemas ou sugestões, abra uma issue no repositório:
+[Issues do Projeto](https://github.com/renatotn7/EclipseSaiAppPlugin/issues)
+
+---
+
+⭐ Se você achou este projeto útil, considere deixar uma estrela!
