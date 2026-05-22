@@ -16,7 +16,7 @@ Plugin de assistencia de engenharia de software para Eclipse, com foco em:
 ## 📋 Pré-requisitos
 
 - Eclipse IDE (4.13+)
-- Java Development Kit (JDK 11+)
+- Java Development Kit (JDK 21+)
 - Eclipse Plugin Development Environment (PDE)
 - Maven (opcional, para build)
 
