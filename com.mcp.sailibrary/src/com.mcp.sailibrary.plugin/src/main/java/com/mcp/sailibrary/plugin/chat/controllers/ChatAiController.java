@@ -10,7 +10,6 @@ import org.eclipse.swt.widgets.Display;
 import org.eclipse.ui.IEditorPart;
 import org.eclipse.ui.texteditor.ITextEditor;
 
-import com.mcp.sailibrary.plugin.SaiLibraryMcpClient;
 import com.mcp.sailibrary.plugin.agent.context.ContextOrchestrator;
 import com.mcp.sailibrary.plugin.agent.context.analise.ProjectMemoryStore;
 import com.mcp.sailibrary.plugin.agent.orchestration.AgentOrchestrator;
@@ -19,6 +18,7 @@ import com.mcp.sailibrary.plugin.chat.service.SessionHistoryService;
 import com.mcp.sailibrary.plugin.chat.support.AiResponse;
 import com.mcp.sailibrary.plugin.chat.support.ToolResultSummarizer;
 import com.mcp.sailibrary.plugin.chat.views.ChatView;
+import com.mcp.sailibrary.plugin.mcp.SaiLibraryMcpClient;
 import com.mcp.sailibrary.plugin.chat.blocks.model.NamedCodeBlock;
 import com.mcp.sailibrary.plugin.chat.blocks.service.EditorNavigationService;
 import com.mcp.sailibrary.plugin.chat.blocks.service.NamedBlockDocumentBindingService;
@@ -722,8 +722,8 @@ public class ChatAiController {
         final long tokenMissao = this.tokenMissaoAtual;
         final String instrucaoSnapshot = instrucao;
         final String pedidoOriginalSnapshot = pedidoOriginal;
-        final String selectedCodeSnapshot = this.selectedCode;
-        final String fullFileTextSnapshot = this.fullFileText;
+        final String selectedCodeSnapshot = this.selectedCode != null ? this.selectedCode : "";
+        final String fullFileTextSnapshot = this.fullFileText != null ? this.fullFileText : "";
         final String apiKeySnapshot = this.apiKey;
         final IDocument documentSnapshot = this.document;
         final ITextSelection selectionSnapshot = this.selection;

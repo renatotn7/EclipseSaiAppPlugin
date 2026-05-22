@@ -3,20 +3,25 @@ package com.mcp.sailibrary.plugin.agent.tools.mutation;
 import java.io.File;
 
 import com.mcp.sailibrary.plugin.agent.AgentTool;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
-import com.mcp.sailibrary.plugin.chat.context.service.SafeWorkspaceMutationPolicy;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
-/* yaml_header: version: "1.0" purpose: "Criar nova package ou pasta dentro de um contexto estrutural editavel." libraries: - java.io.File: runtime */
+import com.mcp.sailibrary.plugin.agent.tools.support.StructuralTargetResolver;
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+import com.mcp.sailibrary.plugin.chat.context.service.SafeWorkspaceMutationPolicy;
+
+/** * Cria nova package ou pasta dentro de um contexto estrutural editavel. * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class CreateProjectPackageTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private final File rootDirectory;
     private final SafeWorkspaceMutationPolicy mutationPolicy;
+    private final StructuralTargetResolver structuralTargetResolver;
 
+    /** * Inicializa a ferramenta com raiz segura, politica de mutacao e resolvedor * de aliases estruturais. * * @param rootDirectory raiz segura do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public CreateProjectPackageTool(File rootDirectory) {
         this.rootDirectory = rootDirectory;
         this.mutationPolicy = new SafeWorkspaceMutationPolicy(rootDirectory);
+        this.structuralTargetResolver = new StructuralTargetResolver(rootDirectory);
     }
 
     @Override
@@ -33,9 +38,9 @@ public class CreateProjectPackageTool implements AgentTool, AgentToolPromptMetad
             return "Erro Operacional: A politica de mutacao nao permite criar package/pasta neste alvo.";
         }
 
-        File baseDirectory = resolveBaseDirectory(target);
+        File baseDirectory = structuralTargetResolver.resolveBaseDirectory(target);
         if (baseDirectory == null) {
-            return "Erro Operacional: Nao foi possivel resolver o diretorio base do alvo estrutural.";
+            return "Erro Operacional: Nao foi possivel resolver o diretorio base real do alvo estrutural.";
         }
 
         File targetDirectory = new File(baseDirectory, relativePath);
@@ -52,30 +57,6 @@ public class CreateProjectPackageTool implements AgentTool, AgentToolPromptMetad
         return "Package/pasta criada com sucesso em: " + normalizePath(targetDirectory);
     }
 
-    private File resolveBaseDirectory(String targetName) {
-        java.util.List<com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContext> contexts =
-                com.mcp.sailibrary.plugin.chat.context.service.NamedStructuralContextSessionService.getInstance().getAll();
-
-        for (int i = 0; i < contexts.size(); i++) {
-            com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContext context = contexts.get(i);
-            if (context != null && targetName != null && targetName.equals(context.getName())) {
-                if (context.getFilePath() != null && context.getFilePath().trim().length() > 0) {
-                    File file = new File(context.getFilePath());
-                    if (file.exists() && file.isDirectory()) {
-                        return file;
-                    }
-                }
-                if (context.getRelativePath() != null && context.getRelativePath().trim().length() > 0) {
-                    File file = new File(rootDirectory, context.getRelativePath());
-                    if (file.exists() && file.isDirectory()) {
-                        return file;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -111,6 +92,8 @@ public class CreateProjectPackageTool implements AgentTool, AgentToolPromptMetad
 
         return metadata;
     }
+
+    /** * Normaliza caminho fisico para formato com barras normais. * * @param file arquivo de origem * @return caminho normalizado * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String normalizePath(File file) {
         try {
             return file.getCanonicalPath().replace("\\", "/");

@@ -2,8 +2,8 @@ package com.mcp.sailibrary.plugin.chat.blocks.service;
 
 import java.util.Set;
 
-import com.mcp.sailibrary.plugin.SaiLibraryMcpClient;
 import com.mcp.sailibrary.plugin.chat.blocks.model.NamedBlockKind;
+import com.mcp.sailibrary.plugin.mcp.SaiLibraryMcpClient;
 
 public class BlockNameSuggestionService {
 

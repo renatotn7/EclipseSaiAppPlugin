@@ -2,31 +2,33 @@ package com.mcp.sailibrary.plugin.agent.tools.mutation;
 
 import java.io.File;
 import java.security.MessageDigest;
-import java.util.List;
 
 import com.mcp.sailibrary.plugin.agent.AgentTool;
 import com.mcp.sailibrary.plugin.agent.context.mutation.WorkspaceMutationFacade;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationContext;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationOrigin;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
-import com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContext;
-import com.mcp.sailibrary.plugin.chat.context.service.NamedStructuralContextSessionService;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
-/** * Cria novo arquivo dentro de um contexto estrutural editavel permitido, * registrando a mutacao na infraestrutura versionada interna do plugin. * * <p>Esta implementacao preserva o contrato funcional da tool, incluindo o uso * de target, relativePath e content como parametros principais. A criacao * passa agora pela {@link WorkspaceMutationFacade}, reduzindo duplicacao de * logica e preparando o caminho para undo e redo sem regressao do * comportamento existente.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+import com.mcp.sailibrary.plugin.agent.tools.support.StructuralTargetResolver;
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+import com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContext;
+
+/** * Cria novo arquivo dentro de um contexto estrutural editavel permitido, * registrando a mutacao na infraestrutura versionada interna do plugin. * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class CreateProjectFileTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private final File rootDirectory;
     private final WorkspaceMutationFacade workspaceMutationFacade;
+    private final StructuralTargetResolver structuralTargetResolver;
 
-    /** * Inicializa a tool de criacao de arquivo com suporte a journal e * versionamento interno. * * @param rootDirectory raiz segura do projeto atual * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Inicializa a tool de criacao de arquivo com suporte a journal, * versionamento interno e resolucao de aliases estruturais. * * @param rootDirectory raiz segura do projeto atual * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public CreateProjectFileTool(File rootDirectory) {
         this.rootDirectory = rootDirectory;
         this.workspaceMutationFacade = new WorkspaceMutationFacade(
                 rootDirectory,
                 gerarProjectKey(rootDirectory)
         );
+        this.structuralTargetResolver = new StructuralTargetResolver(rootDirectory);
     }
 
     @Override
@@ -53,10 +55,20 @@ public class CreateProjectFileTool implements AgentTool, AgentToolPromptMetadata
             return "Erro Operacional: A raiz segura do projeto esta indisponivel para criacao de arquivo.";
         }
 
-        NamedStructuralContext targetContext = resolveTargetContext(target);
+        NamedStructuralContext targetContext = structuralTargetResolver.resolveContext(target);
         if (targetContext == null) {
             return "Erro Operacional: O alvo estrutural informado nao foi encontrado na sessao atual.";
         }
+
+        File baseDirectory = structuralTargetResolver.resolveBaseDirectory(target);
+        if (baseDirectory == null || !baseDirectory.exists() || !baseDirectory.isDirectory()) {
+            return "Erro Operacional: O alvo estrutural informado nao pode ser resolvido para um diretorio real do workspace.";
+        }
+
+        String fullRelativePath = joinRelativePath(
+                structuralTargetResolver.resolveRelativePath(target),
+                relativePath
+        );
 
         MutationContext context = new MutationContext();
         context.setProjectRootDirectory(rootDirectory);
@@ -73,11 +85,12 @@ public class CreateProjectFileTool implements AgentTool, AgentToolPromptMetadata
 
         try {
             workspaceMutationFacade.initializeInfrastructure();
-            return workspaceMutationFacade.applyCreateFile(context, relativePath, content);
+            return workspaceMutationFacade.applyCreateFile(context, fullRelativePath, content);
         } catch (Exception e) {
             return "Falha ao criar arquivo no projeto: " + e.getMessage();
         }
     }
+
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -127,26 +140,30 @@ public class CreateProjectFileTool implements AgentTool, AgentToolPromptMetadata
 
         return metadata;
     }
-    /** * Resolve o contexto estrutural alvo pelo nome registrado na sessao atual. * * <p>O metodo busca o alvo entre os contextos estruturais nomeados ativos, * preservando compatibilidade com o comportamento anterior da tool.</p> * * @param targetName nome logico do alvo estrutural * @return contexto estrutural encontrado ou null * * @author Renato Tomaz Nati * @since 2026-05-20 */
-    private NamedStructuralContext resolveTargetContext(String targetName) {
-        if (isBlank(targetName)) {
-            return null;
+
+    /** * Une caminho relativo base e caminho filho em um unico path normalizado. * * @param baseRelativePath caminho relativo base * @param childRelativePath caminho relativo filho * @return caminho relativo final * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String joinRelativePath(String baseRelativePath, String childRelativePath) {
+        String base = baseRelativePath != null ? baseRelativePath.trim().replace("\\", "/") : "";
+        String child = childRelativePath != null ? childRelativePath.trim().replace("\\", "/") : "";
+
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        while (child.startsWith("/")) {
+            child = child.substring(1);
         }
 
-        List<NamedStructuralContext> contexts =
-                NamedStructuralContextSessionService.getInstance().getAll();
-
-        for (int i = 0; i < contexts.size(); i++) {
-            NamedStructuralContext context = contexts.get(i);
-            if (context != null && targetName.equals(context.getName())) {
-                return context;
-            }
+        if (base.length() == 0) {
+            return child;
+        }
+        if (child.length() == 0) {
+            return base;
         }
 
-        return null;
+        return base + "/" + child;
     }
 
-    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * <p>O formato segue a mesma estrategia defensiva usada na camada de * memoria persistente e mutacao, preservando nome base normalizado e hash * curto da raiz canonica.</p> * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarProjectKey(File rootDirectory) {
         if (rootDirectory == null) {
             return "unknown_project";
@@ -194,7 +211,7 @@ public class CreateProjectFileTool implements AgentTool, AgentToolPromptMetadata
         return normalized;
     }
 
-    /** * Detecta a branch atual do projeto a partir do arquivo .git/HEAD, quando * disponivel. * * @param projectRoot raiz fisica do projeto * @return nome da branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Detecta a branch atual do projeto a partir do arquivo .git/HEAD. * * @param projectRoot raiz fisica do projeto * @return branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String detectarBranchAtual(File projectRoot) {
         if (projectRoot == null) {
             return "";
@@ -227,7 +244,7 @@ public class CreateProjectFileTool implements AgentTool, AgentToolPromptMetadata
         }
     }
 
-    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a ser validado * @return true quando o valor estiver em branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a validar * @return true quando o valor for branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private boolean isBlank(String value) {
         return value == null || value.trim().length() == 0;
     }

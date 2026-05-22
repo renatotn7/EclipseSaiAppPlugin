@@ -7,17 +7,20 @@ import com.mcp.sailibrary.plugin.agent.AgentTool;
 import com.mcp.sailibrary.plugin.agent.context.mutation.JGitWorkspaceRepository;
 import com.mcp.sailibrary.plugin.agent.context.mutation.ProjectMutationStore;
 import com.mcp.sailibrary.plugin.agent.context.mutation.diff.WorkspaceMutationDiffService;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
-/** * Inspeciona o diff de um arquivo mutado no workspace a partir dos estados * persistidos na infraestrutura interna de mutacao. * * <p>Esta tool e somente leitura e foi desenhada para apoiar a IA em tarefas * como: * <ul> * <li>explicar o que mudou em um arquivo</li> * <li>avaliar se vale desfazer ou refazer uma mutacao</li> * <li>comparar before, after e current de uma operacao</li> * <li>medir a magnitude aproximada de uma mudanca</li> * </ul> * </p> * * <p>Ela nao altera o workspace real, nao grava no journal e nao movimenta as * pilhas de undo/redo.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+import com.mcp.sailibrary.plugin.agent.tools.support.StructuralTargetResolver;
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+
+/** * Inspeciona o diff de um arquivo mutado no workspace a partir dos estados * persistidos na infraestrutura interna de mutacao. * * <p>Esta tool e somente leitura e foi desenhada para apoiar a IA em tarefas * como: * <ul> * <li>explicar o que mudou em um arquivo</li> * <li>avaliar se vale desfazer ou refazer uma mutacao</li> * <li>comparar before, after e current de uma operacao</li> * <li>medir a magnitude aproximada de uma mudanca</li> * </ul> * </p> * * <p>Ela pode operar com: * <ul> * <li>path completo do arquivo</li> * <li>ou target estrutural + relativePath</li> * </ul> * </p> * * <p>Ela nao altera o workspace real, nao grava no journal e nao movimenta as * pilhas de undo/redo.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class InspectWorkspaceMutationDiffTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private final File rootDirectory;
     private final ProjectMutationStore mutationStore;
     private final JGitWorkspaceRepository gitRepository;
     private final WorkspaceMutationDiffService diffService;
+    private final StructuralTargetResolver structuralTargetResolver;
 
     /** * Inicializa a tool de inspecao de diff da camada de mutacao. * * @param rootDirectory raiz segura do projeto atual * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public InspectWorkspaceMutationDiffTool(File rootDirectory) {
@@ -34,12 +37,14 @@ public class InspectWorkspaceMutationDiffTool implements AgentTool, AgentToolPro
                 this.mutationStore,
                 this.gitRepository
         );
+        this.structuralTargetResolver = new StructuralTargetResolver(rootDirectory);
     }
 
     @Override
     public String getName() {
         return "inspecionar_diff_mutacao_workspace";
     }
+
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -49,10 +54,24 @@ public class InspectWorkspaceMutationDiffTool implements AgentTool, AgentToolPro
 
         AgentToolParameterMetadata path = new AgentToolParameterMetadata();
         path.setName("path");
-        path.setRequired(true);
-        path.setDescription("Caminho relativo do arquivo alvo.");
+        path.setRequired(false);
+        path.setDescription("Caminho relativo completo do arquivo alvo.");
         path.setExampleValue("src/main/java/com/exemplo/Servico.java");
         metadata.addParameter(path);
+
+        AgentToolParameterMetadata target = new AgentToolParameterMetadata();
+        target.setName("target");
+        target.setRequired(false);
+        target.setDescription("Alias de contexto estrutural usado como base quando path completo nao for informado.");
+        target.setExampleValue("batchjob");
+        metadata.addParameter(target);
+
+        AgentToolParameterMetadata relativePath = new AgentToolParameterMetadata();
+        relativePath.setName("relativePath");
+        relativePath.setRequired(false);
+        relativePath.setDescription("Caminho relativo do arquivo dentro do contexto estrutural informado em target.");
+        relativePath.setExampleValue("AtualizacaoAgendaJobV2.java");
+        metadata.addParameter(relativePath);
 
         AgentToolParameterMetadata batchId = new AgentToolParameterMetadata();
         batchId.setName("batchId");
@@ -86,23 +105,32 @@ public class InspectWorkspaceMutationDiffTool implements AgentTool, AgentToolPro
         metadata.addRecommendedUseCase("Use antes de decidir por undo, redo ou restore cirurgico.");
         metadata.addRecommendedUseCase("Use para comparar before, after e current de uma mutacao.");
 
-        metadata.addGuardrail("Nao use diff textual gigante sem necessidade.");
+        metadata.addGuardrail("Informe path completo ou target + relativePath.");
         metadata.addGuardrail("Prefira operationId ou batchId quando o historico for grande.");
         metadata.addGuardrail("Use modo before_after para leitura rapida da mutacao original.");
 
         metadata.addJsonExample(
-                "{\\\"action\\\":\\\"executar_ferramenta\\\",\\\"tool\\\":\\\"inspecionar_diff_mutacao_workspace\\\",\\\"parameters\\\":{\\\"path\\\":\\\"src/main/java/com/exemplo/Servico.java\\\",\\\"mode\\\":\\\"before_after\\\",\\\"maxLines\\\":\\\"80\\\"},\\\"explanation\\\":\\\"Preciso inspecionar o diff do arquivo antes de decidir restauracao ou manter a mudanca.\\\"}"
+                "{\\\"action\\\":\\\"executar_ferramenta\\\",\\\"tool\\\":\\\"inspecionar_diff_mutacao_workspace\\\",\\\"parameters\\\":{\\\"target\\\":\\\"batchjob\\\",\\\"relativePath\\\":\\\"AtualizacaoAgendaJobV2.java\\\",\\\"mode\\\":\\\"before_after\\\",\\\"maxLines\\\":\\\"80\\\"},\\\"explanation\\\":\\\"Preciso inspecionar o diff do arquivo antes de decidir restauracao ou manter a mudanca.\\\"}"
         );
 
         return metadata;
     }
+
+    /** * Executa a inspecao de diff com base no caminho efetivamente resolvido. * * @param jsonParameters parametros JSON da ferramenta * @return relatorio textual do diff * * @author Renato Tomaz Nati * @since 2026-05-20 */
     @Override
     public String execute(String jsonParameters) {
-        String relativePath = ToolJsonSupport.extractJsonStringValue(jsonParameters, "path");
+        String path = ToolJsonSupport.extractJsonStringValue(jsonParameters, "path");
+        String target = ToolJsonSupport.extractJsonStringValue(jsonParameters, "target");
+        String relativePath = ToolJsonSupport.extractJsonStringValue(jsonParameters, "relativePath");
         String batchId = ToolJsonSupport.extractJsonStringValue(jsonParameters, "batchId");
         String operationId = ToolJsonSupport.extractJsonStringValue(jsonParameters, "operationId");
         String mode = ToolJsonSupport.extractJsonStringValue(jsonParameters, "mode");
         int maxLines = ToolJsonSupport.extractJsonIntValue(jsonParameters, "maxLines", 80, 10, 400);
+
+        String resolvedRelativePath = resolveEffectiveRelativePath(path, target, relativePath);
+        if (isBlank(resolvedRelativePath)) {
+            return "Erro Operacional: E necessario informar 'path' ou combinar 'target' com 'relativePath' para inspecionar diff de mutacao.";
+        }
 
         if (rootDirectory == null || !rootDirectory.exists() || !rootDirectory.isDirectory()) {
             return "Erro Operacional: A raiz segura do projeto esta indisponivel para inspecao de diff de mutacao.";
@@ -113,7 +141,7 @@ public class InspectWorkspaceMutationDiffTool implements AgentTool, AgentToolPro
             gitRepository.ensureRepositoryInitialized();
 
             return diffService.inspectDiff(
-                    relativePath,
+                    resolvedRelativePath,
                     batchId,
                     operationId,
                     mode,
@@ -124,7 +152,56 @@ public class InspectWorkspaceMutationDiffTool implements AgentTool, AgentToolPro
         }
     }
 
-    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * <p>O formato segue a mesma estrategia defensiva usada na camada de * memoria persistente e mutacao, preservando nome base normalizado e hash * curto da raiz canonica.</p> * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Resolve o caminho relativo efetivo com base em path explicito ou em * target estrutural combinado com relativePath. * * @param path caminho relativo completo * @param target alias estrutural * @param relativePath caminho relativo dentro do alias estrutural * @return caminho relativo final ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String resolveEffectiveRelativePath(String path, String target, String relativePath) {
+        if (!isBlank(path)) {
+            return normalizeRelativePath(path);
+        }
+
+        if (isBlank(target) || isBlank(relativePath)) {
+            return "";
+        }
+
+        String baseRelativePath = structuralTargetResolver.resolveRelativePath(target);
+        return joinRelativePath(baseRelativePath, relativePath);
+    }
+
+    /** * Une caminho relativo base e caminho relativo filho em um unico path * normalizado. * * @param baseRelativePath base relativa * @param childRelativePath filho relativo * @return caminho relativo final * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String joinRelativePath(String baseRelativePath, String childRelativePath) {
+        String base = baseRelativePath != null ? baseRelativePath.trim().replace("\\", "/") : "";
+        String child = childRelativePath != null ? childRelativePath.trim().replace("\\", "/") : "";
+
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        while (child.startsWith("/")) {
+            child = child.substring(1);
+        }
+
+        if (base.length() == 0) {
+            return child;
+        }
+        if (child.length() == 0) {
+            return base;
+        }
+
+        return base + "/" + child;
+    }
+
+    /** * Normaliza um caminho relativo para o formato com barras normais. * * @param relativePath caminho relativo original * @return caminho relativo normalizado * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String normalizeRelativePath(String relativePath) {
+        if (relativePath == null) {
+            return "";
+        }
+
+        String normalized = relativePath.trim().replace("\\", "/");
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
+    }
+
+    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarProjectKey(File rootDirectory) {
         if (rootDirectory == null) {
             return "unknown_project";
@@ -170,5 +247,10 @@ public class InspectWorkspaceMutationDiffTool implements AgentTool, AgentToolPro
         String normalized = name.toLowerCase();
         normalized = normalized.replaceAll("[^a-z0-9_\\-]", "_");
         return normalized;
+    }
+
+    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a validar * @return true quando o valor estiver em branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private boolean isBlank(String value) {
+        return value == null || value.trim().length() == 0;
     }
 }

@@ -12,16 +12,19 @@ import com.mcp.sailibrary.plugin.agent.context.mutation.JGitWorkspaceRepository;
 import com.mcp.sailibrary.plugin.agent.context.mutation.ProjectMutationStore;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationBatch;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationOperation;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
-/** * Restaura um arquivo especifico do workspace a partir do historico de mutacao * persistido no repositorio interno versionado. * * <p>Esta tool opera de forma cirurgica sobre um unico arquivo, sem acionar * undo ou redo de batch completo. O chamador deve informar o path do arquivo e * pode opcionalmente restringir a restauracao por operationId, batchId ou modo * de restauracao.</p> * * <p>Modos suportados: * <ul> * <li>before: restaura o estado anterior da operacao selecionada</li> * <li>after: restaura o estado posterior da operacao selecionada</li> * <li>last_safe: prioriza beforeCommitId e faz fallback para afterCommitId</li> * </ul> * </p> * * <p>Esta implementacao nao altera pilhas de undo/redo e nao registra novo * batch semantico. Seu papel e restauracao cirurgica de arquivo a partir do * historico persistido.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+import com.mcp.sailibrary.plugin.agent.tools.support.StructuralTargetResolver;
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+
+/** * Restaura um arquivo especifico do workspace a partir do historico de mutacao * persistido no repositorio interno versionado. * * <p>Esta tool opera de forma cirurgica sobre um unico arquivo, sem acionar * undo ou redo de batch completo. O chamador pode informar o path completo do * arquivo ou combinar target estrutural com relativePath para que o alias seja * resolvido em um caminho real antes da restauracao.</p> * * <p>Modos suportados: * <ul> * <li>before: restaura o estado anterior da operacao selecionada</li> * <li>after: restaura o estado posterior da operacao selecionada</li> * <li>last_safe: prioriza beforeCommitId e faz fallback para afterCommitId</li> * </ul> * </p> * * <p>Esta implementacao nao altera pilhas de undo/redo e nao registra novo * batch semantico. Seu papel e restauracao cirurgica de arquivo a partir do * historico persistido.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class RestoreWorkspaceFileTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private final File rootDirectory;
     private final ProjectMutationStore mutationStore;
     private final JGitWorkspaceRepository gitRepository;
+    private final StructuralTargetResolver structuralTargetResolver;
 
     /** * Inicializa a tool de restauracao cirurgica de arquivo do workspace. * * @param rootDirectory raiz segura do projeto atual * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public RestoreWorkspaceFileTool(File rootDirectory) {
@@ -33,77 +36,33 @@ public class RestoreWorkspaceFileTool implements AgentTool, AgentToolPromptMetad
         this.gitRepository = new JGitWorkspaceRepository(
                 this.mutationStore.getMutationPaths()
         );
+        this.structuralTargetResolver = new StructuralTargetResolver(rootDirectory);
     }
 
     @Override
     public String getName() {
         return "restaurar_arquivo_mutado_workspace";
     }
-    @Override
-    public AgentToolPromptMetadata getPromptMetadata() {
-        AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
-        metadata.setToolName(getName());
-        metadata.setOneLinePurpose("Restaurar cirurgicamente um arquivo mutado do workspace.");
-        metadata.setActivityDescription("Restaura um arquivo especifico do workspace a partir do historico persistido no repositorio interno.");
 
-        AgentToolParameterMetadata path = new AgentToolParameterMetadata();
-        path.setName("path");
-        path.setRequired(true);
-        path.setDescription("Caminho relativo do arquivo a ser restaurado.");
-        path.setExampleValue("src/main/java/com/exemplo/Servico.java");
-        metadata.addParameter(path);
-
-        AgentToolParameterMetadata batchId = new AgentToolParameterMetadata();
-        batchId.setName("batchId");
-        batchId.setRequired(false);
-        batchId.setDescription("Batch especifico a ser usado na restauracao.");
-        batchId.setExampleValue("batch_1716400000000_123");
-        metadata.addParameter(batchId);
-
-        AgentToolParameterMetadata operationId = new AgentToolParameterMetadata();
-        operationId.setName("operationId");
-        operationId.setRequired(false);
-        operationId.setDescription("Operacao especifica a ser usada na restauracao.");
-        operationId.setExampleValue("op_1716400000000_999");
-        metadata.addParameter(operationId);
-
-        AgentToolParameterMetadata mode = new AgentToolParameterMetadata();
-        mode.setName("mode");
-        mode.setRequired(false);
-        mode.setDescription("Modo de restauracao: before, after ou last_safe.");
-        mode.setExampleValue("last_safe");
-        metadata.addParameter(mode);
-
-        metadata.addRecommendedUseCase("Use quando precisar restaurar um unico arquivo sem desfazer um batch inteiro.");
-        metadata.addRecommendedUseCase("Use quando operationId ou batchId ja estiverem claros no historico.");
-        metadata.addRecommendedUseCase("Use para restauracao cirurgica antes de acionar undo de lote completo.");
-
-        metadata.addGuardrail("O parametro path e obrigatorio.");
-        metadata.addGuardrail("Prefira operationId ou batchId quando houver varias mutacoes sobre o mesmo arquivo.");
-        metadata.addGuardrail("Use mode last_safe quando quiser fallback prudente para o estado mais seguro conhecido.");
-
-        metadata.addJsonExample(
-                "{\\\"action\\\":\\\"executar_ferramenta\\\",\\\"tool\\\":\\\"restaurar_arquivo_mutado_workspace\\\",\\\"parameters\\\":{\\\"path\\\":\\\"src/main/java/com/exemplo/Servico.java\\\",\\\"mode\\\":\\\"last_safe\\\"},\\\"explanation\\\":\\\"Preciso restaurar cirurgicamente este arquivo para um estado seguro anterior.\\\"}"
-        );
-
-        return metadata;
-    }
     @Override
     public String execute(String jsonParameters) {
-        String relativePath = ToolJsonSupport.extractJsonStringValue(jsonParameters, "path");
+        String path = ToolJsonSupport.extractJsonStringValue(jsonParameters, "path");
+        String target = ToolJsonSupport.extractJsonStringValue(jsonParameters, "target");
+        String relativePath = ToolJsonSupport.extractJsonStringValue(jsonParameters, "relativePath");
         String batchId = ToolJsonSupport.extractJsonStringValue(jsonParameters, "batchId");
         String operationId = ToolJsonSupport.extractJsonStringValue(jsonParameters, "operationId");
         String mode = ToolJsonSupport.extractJsonStringValue(jsonParameters, "mode");
 
-        if (isBlank(relativePath)) {
-            return "Erro Operacional: O parametro path e obrigatorio.";
+        String resolvedRelativePath = resolveEffectiveRelativePath(path, target, relativePath);
+        if (isBlank(resolvedRelativePath)) {
+            return "Erro Operacional: E necessario informar 'path' ou combinar 'target' com 'relativePath' para restaurar o arquivo.";
         }
 
         if (rootDirectory == null || !rootDirectory.exists() || !rootDirectory.isDirectory()) {
             return "Erro Operacional: A raiz segura do projeto esta indisponivel para restauracao de arquivo.";
         }
 
-        String normalizedPath = normalizeRelativePath(relativePath);
+        String normalizedPath = normalizeRelativePath(resolvedRelativePath);
         String normalizedMode = normalizeMode(mode);
 
         try {
@@ -137,6 +96,70 @@ public class RestoreWorkspaceFileTool implements AgentTool, AgentToolPromptMetad
         } catch (Exception e) {
             return "Falha ao restaurar arquivo do workspace: " + e.getMessage();
         }
+    }
+
+    @Override
+    public AgentToolPromptMetadata getPromptMetadata() {
+        AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
+        metadata.setToolName(getName());
+        metadata.setOneLinePurpose("Restaurar cirurgicamente um arquivo mutado do workspace.");
+        metadata.setActivityDescription("Restaura um arquivo especifico do workspace a partir do historico persistido no repositorio interno.");
+
+        AgentToolParameterMetadata path = new AgentToolParameterMetadata();
+        path.setName("path");
+        path.setRequired(false);
+        path.setDescription("Caminho relativo completo do arquivo a ser restaurado.");
+        path.setExampleValue("src/main/java/com/exemplo/Servico.java");
+        metadata.addParameter(path);
+
+        AgentToolParameterMetadata target = new AgentToolParameterMetadata();
+        target.setName("target");
+        target.setRequired(false);
+        target.setDescription("Alias de contexto estrutural usado como base quando path completo nao for informado.");
+        target.setExampleValue("batchjob");
+        metadata.addParameter(target);
+
+        AgentToolParameterMetadata relativePath = new AgentToolParameterMetadata();
+        relativePath.setName("relativePath");
+        relativePath.setRequired(false);
+        relativePath.setDescription("Caminho relativo do arquivo dentro do contexto estrutural informado em target.");
+        relativePath.setExampleValue("AtualizacaoAgendaJobV2.java");
+        metadata.addParameter(relativePath);
+
+        AgentToolParameterMetadata batchId = new AgentToolParameterMetadata();
+        batchId.setName("batchId");
+        batchId.setRequired(false);
+        batchId.setDescription("Batch especifico a ser usado na restauracao.");
+        batchId.setExampleValue("batch_1716400000000_123");
+        metadata.addParameter(batchId);
+
+        AgentToolParameterMetadata operationId = new AgentToolParameterMetadata();
+        operationId.setName("operationId");
+        operationId.setRequired(false);
+        operationId.setDescription("Operacao especifica a ser usada na restauracao.");
+        operationId.setExampleValue("op_1716400000000_999");
+        metadata.addParameter(operationId);
+
+        AgentToolParameterMetadata mode = new AgentToolParameterMetadata();
+        mode.setName("mode");
+        mode.setRequired(false);
+        mode.setDescription("Modo de restauracao: before, after ou last_safe.");
+        mode.setExampleValue("last_safe");
+        metadata.addParameter(mode);
+
+        metadata.addRecommendedUseCase("Use quando precisar restaurar um unico arquivo sem desfazer um batch inteiro.");
+        metadata.addRecommendedUseCase("Use quando operationId ou batchId ja estiverem claros no historico.");
+        metadata.addRecommendedUseCase("Use para restauracao cirurgica antes de acionar undo de lote completo.");
+
+        metadata.addGuardrail("Informe path completo ou target + relativePath.");
+        metadata.addGuardrail("Prefira operationId ou batchId quando houver varias mutacoes sobre o mesmo arquivo.");
+        metadata.addGuardrail("Use mode last_safe quando quiser fallback prudente para o estado mais seguro conhecido.");
+
+        metadata.addJsonExample(
+                "{\\\"action\\\":\\\"executar_ferramenta\\\",\\\"tool\\\":\\\"restaurar_arquivo_mutado_workspace\\\",\\\"parameters\\\":{\\\"target\\\":\\\"batchjob\\\",\\\"relativePath\\\":\\\"AtualizacaoAgendaJobV2.java\\\",\\\"mode\\\":\\\"last_safe\\\"},\\\"explanation\\\":\\\"Preciso restaurar cirurgicamente este arquivo para um estado seguro anterior.\\\"}"
+        );
+
+        return metadata;
     }
 
     /** * Resolve a operacao alvo com base em operationId, batchId e path. * * <p>A prioridade de resolucao e: * <ol> * <li>operationId explicito</li> * <li>batchId + path</li> * <li>path no historico global</li> * </ol> * </p> * * @param relativePath caminho relativo do arquivo alvo * @param batchId identificador opcional de batch * @param operationId identificador opcional de operacao * @return operacao compativel mais adequada ou null * * @author Renato Tomaz Nati * @since 2026-05-20 */
@@ -234,6 +257,42 @@ public class RestoreWorkspaceFileTool implements AgentTool, AgentToolPromptMetad
         return "";
     }
 
+    /** * Resolve o caminho relativo efetivo do arquivo a restaurar. * * <p>A prioridade e: * <ol> * <li>path explicito</li> * <li>target estrutural + relativePath</li> * </ol> * </p> * * @param path caminho relativo completo * @param target alias estrutural * @param relativePath caminho relativo dentro do alias estrutural * @return caminho relativo final ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String resolveEffectiveRelativePath(String path, String target, String relativePath) {
+        if (!isBlank(path)) {
+            return normalizeRelativePath(path);
+        }
+
+        if (isBlank(target) || isBlank(relativePath)) {
+            return "";
+        }
+
+        String baseRelativePath = structuralTargetResolver.resolveRelativePath(target);
+        return joinRelativePath(baseRelativePath, relativePath);
+    }
+
+    /** * Une caminho relativo base e caminho relativo filho em um unico path * normalizado. * * @param baseRelativePath base relativa * @param childRelativePath filho relativo * @return caminho relativo final * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String joinRelativePath(String baseRelativePath, String childRelativePath) {
+        String base = baseRelativePath != null ? baseRelativePath.trim().replace("\\", "/") : "";
+        String child = childRelativePath != null ? childRelativePath.trim().replace("\\", "/") : "";
+
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        while (child.startsWith("/")) {
+            child = child.substring(1);
+        }
+
+        if (base.length() == 0) {
+            return child;
+        }
+        if (child.length() == 0) {
+            return base;
+        }
+
+        return base + "/" + child;
+    }
+
     /** * Retorna true quando a operacao corresponde ao path informado. * * @param operation operacao a validar * @param relativePath caminho relativo alvo * @return true quando houver correspondencia de caminho * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private boolean operationMatchesPath(MutationOperation operation, String relativePath) {
         if (operation == null) {
@@ -291,7 +350,7 @@ public class RestoreWorkspaceFileTool implements AgentTool, AgentToolPromptMetad
         return normalized;
     }
 
-    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * <p>O formato segue a mesma estrategia defensiva usada na camada de * memoria persistente e mutacao, preservando nome base normalizado e hash * curto da raiz canonica.</p> * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarProjectKey(File rootDirectory) {
         if (rootDirectory == null) {
             return "unknown_project";

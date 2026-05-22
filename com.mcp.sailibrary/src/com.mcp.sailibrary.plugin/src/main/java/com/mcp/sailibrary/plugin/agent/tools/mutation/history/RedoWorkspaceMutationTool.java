@@ -7,10 +7,10 @@ import com.mcp.sailibrary.plugin.agent.AgentTool;
 import com.mcp.sailibrary.plugin.agent.context.mutation.WorkspaceMutationFacade;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationContext;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationOrigin;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
-import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+
 /** * Refaz o ultimo batch de mutacao registrado na infraestrutura versionada * interna do plugin. * * <p>Esta implementacao preserva o contrato simples de tool autonoma e delega * a logica efetiva de reaplicacao para a {@link WorkspaceMutationFacade}. A * primeira versao opera sobre o ultimo batch disponivel na pilha de redo, * evitando comportamento ambiguo enquanto o suporte a redo seletivo por path * ou batch especifico ainda nao foi expandido na fachada.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class RedoWorkspaceMutationTool implements AgentTool, AgentToolPromptMetadataProvider {
 
@@ -59,6 +59,7 @@ public class RedoWorkspaceMutationTool implements AgentTool, AgentToolPromptMeta
             return "Falha ao refazer mutacao do workspace: " + e.getMessage();
         }
     }
+
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -71,16 +72,17 @@ public class RedoWorkspaceMutationTool implements AgentTool, AgentToolPromptMeta
         metadata.addRecommendedUseCase("Use quando a IA concluir que o undo anterior nao deveria ter sido mantido.");
 
         metadata.addGuardrail("Nao use se a pilha de redo estiver vazia.");
-        metadata.addGuardrail("A ferramenta opera sobre o ultimo batch, nao sobre arquivo arbitrario.");
+        metadata.addGuardrail("A ferramenta atua sobre o ultimo batch, nao sobre arquivo arbitrario.");
         metadata.addGuardrail("Consulte estado e historico antes de refazer mudancas sensiveis.");
 
         metadata.addJsonExample(
-                "{\\\"action\\\":\\\"executar_ferramenta\\\",\\\"tool\\\":\\\"refazer_mutacao_workspace\\\",\\\"parameters\\\":{},\\\"explanation\\\":\\\"Preciso refazer o ultimo batch desfeito apos validar que o redo e seguro.\\\"}"
+                "{\\\"action\\\":\\\"executar_ferramenta\\\",\\\"tool\\\":\\\"refazer_mutacao_workspace\\\",\\\"parameters\\\":{},\\\"explanation\\\":\\\"Preciso refazer o ultimo batch desfeito apos validar que o redo e desejado.\\\"}"
         );
 
         return metadata;
     }
-    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * <p>O formato segue a mesma estrategia defensiva usada na camada de * memoria persistente e mutacao, preservando nome base normalizado e hash * curto da raiz canonica.</p> * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+
+    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarProjectKey(File rootDirectory) {
         if (rootDirectory == null) {
             return "unknown_project";
@@ -128,7 +130,7 @@ public class RedoWorkspaceMutationTool implements AgentTool, AgentToolPromptMeta
         return normalized;
     }
 
-    /** * Detecta a branch atual do projeto a partir do arquivo .git/HEAD, quando * disponivel. * * @param projectRoot raiz fisica do projeto * @return nome da branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Detecta a branch atual do projeto a partir do arquivo .git/HEAD. * * @param projectRoot raiz fisica do projeto * @return nome da branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String detectarBranchAtual(File projectRoot) {
         if (projectRoot == null) {
             return "";
@@ -161,7 +163,7 @@ public class RedoWorkspaceMutationTool implements AgentTool, AgentToolPromptMeta
         }
     }
 
-    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a ser validado * @return true quando o valor estiver em branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a validar * @return true quando o valor estiver em branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private boolean isBlank(String value) {
         return value == null || value.trim().length() == 0;
     }

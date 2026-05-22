@@ -11,15 +11,18 @@ import com.mcp.sailibrary.plugin.agent.AgentTool;
 import com.mcp.sailibrary.plugin.agent.context.mutation.ProjectMutationStore;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationBatch;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationOperation;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
-/** * Lista o historico persistido de mutacoes do workspace para o projeto atual. * * <p>Esta tool permite inspecionar batches e operacoes registradas pela camada * de mutacao, com filtro opcional por path e limite de resultados. O objetivo * e oferecer visibilidade tatica para a IA antes de executar undo, redo ou * restauracoes seletivas.</p> * * <p>Esta implementacao e somente de leitura. Nenhuma alteracao e aplicada no * workspace real, no espelho interno ou no journal de mutacao.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+import com.mcp.sailibrary.plugin.agent.tools.support.StructuralTargetResolver;
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+
+/** * Lista o historico persistido de mutacoes do workspace para o projeto atual. * * <p>Esta tool permite inspecionar batches e operacoes registradas pela camada * de mutacao, com filtro opcional por path, ou por alias estrutural combinado * com relativePath, e com limite de resultados. O objetivo e oferecer * visibilidade tatica para a IA antes de executar undo, redo ou restauracoes * seletivas.</p> * * <p>Esta implementacao e somente de leitura. Nenhuma alteracao e aplicada no * workspace real, no espelho interno ou no journal de mutacao.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private final File rootDirectory;
     private final ProjectMutationStore mutationStore;
+    private final StructuralTargetResolver structuralTargetResolver;
 
     /** * Inicializa a tool de listagem de historico de mutacoes do projeto atual. * * @param rootDirectory raiz segura do projeto atual * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public ListWorkspaceMutationHistoryTool(File rootDirectory) {
@@ -28,6 +31,7 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
                 rootDirectory,
                 gerarProjectKey(rootDirectory)
         );
+        this.structuralTargetResolver = new StructuralTargetResolver(rootDirectory);
     }
 
     @Override
@@ -38,6 +42,8 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
     @Override
     public String execute(String jsonParameters) {
         String path = ToolJsonSupport.extractJsonStringValue(jsonParameters, "path");
+        String target = ToolJsonSupport.extractJsonStringValue(jsonParameters, "target");
+        String relativePath = ToolJsonSupport.extractJsonStringValue(jsonParameters, "relativePath");
         String batchId = ToolJsonSupport.extractJsonStringValue(jsonParameters, "batchId");
         int limit = ToolJsonSupport.extractJsonIntValue(jsonParameters, "limit", 10, 1, 200);
 
@@ -45,18 +51,21 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
             return "Erro Operacional: A raiz segura do projeto esta indisponivel para consulta de historico de mutacoes.";
         }
 
+        String resolvedPath = resolveEffectiveRelativePath(path, target, relativePath);
+
         try {
             mutationStore.inicializarEstrutura();
 
             if (!isBlank(batchId)) {
-                return listarBatchEspecifico(batchId);
+                return listarBatchEspecifico(batchId, resolvedPath);
             }
 
-            return listarHistoricoGeral(path, limit);
+            return listarHistoricoGeral(resolvedPath, limit, target, relativePath);
         } catch (Exception e) {
             return "Falha ao consultar historico de mutacoes: " + e.getMessage();
         }
     }
+
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -70,6 +79,20 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
         path.setDescription("Filtro opcional por caminho relativo ou trecho de caminho.");
         path.setExampleValue("src/main/java/com/exemplo/Servico.java");
         metadata.addParameter(path);
+
+        AgentToolParameterMetadata target = new AgentToolParameterMetadata();
+        target.setName("target");
+        target.setRequired(false);
+        target.setDescription("Alias de contexto estrutural usado como base quando path completo nao for informado.");
+        target.setExampleValue("batchjob");
+        metadata.addParameter(target);
+
+        AgentToolParameterMetadata relativePath = new AgentToolParameterMetadata();
+        relativePath.setName("relativePath");
+        relativePath.setRequired(false);
+        relativePath.setDescription("Caminho relativo dentro do contexto estrutural informado em target.");
+        relativePath.setExampleValue("AtualizacaoAgendaJobV2.java");
+        metadata.addParameter(relativePath);
 
         AgentToolParameterMetadata batchId = new AgentToolParameterMetadata();
         batchId.setName("batchId");
@@ -90,21 +113,24 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
         metadata.addRecommendedUseCase("Use para explicar o historico recente de alteracoes do workspace.");
 
         metadata.addGuardrail("Prefira batchId quando o historico estiver muito grande.");
-        metadata.addGuardrail("Use filtro por path para reduzir ruido.");
+        metadata.addGuardrail("Use filtro por path ou target + relativePath para reduzir ruido.");
         metadata.addGuardrail("Esta ferramenta nao altera nada no workspace.");
 
         metadata.addJsonExample(
-                "{\\\"action\\\":\\\"executar_ferramenta\\\",\\\"tool\\\":\\\"listar_historico_mutacoes\\\",\\\"parameters\\\":{\\\"path\\\":\\\"src/main/java/com/exemplo/Servico.java\\\",\\\"limit\\\":\\\"10\\\"},\\\"explanation\\\":\\\"Preciso consultar o historico persistido de mutacoes antes de decidir o proximo passo.\\\"}"
+                "{\\\"action\\\":\\\"executar_ferramenta\\\",\\\"tool\\\":\\\"listar_historico_mutacoes\\\",\\\"parameters\\\":{\\\"target\\\":\\\"batchjob\\\",\\\"relativePath\\\":\\\"AtualizacaoAgendaJobV2.java\\\",\\\"limit\\\":\\\"10\\\"},\\\"explanation\\\":\\\"Preciso consultar o historico persistido de mutacoes antes de decidir o proximo passo.\\\"}"
         );
 
         return metadata;
     }
-    /** * Lista um batch especifico do historico persistido. * * @param batchId identificador do lote desejado * @return relatorio textual do batch ou mensagem de ausencia * * @author Renato Tomaz Nati * @since 2026-05-20 */
-    private String listarBatchEspecifico(String batchId) {
+
+    /** * Lista um batch especifico do historico persistido. * * @param batchId identificador do lote desejado * @param pathFilter filtro opcional de path * @return relatorio textual do batch ou mensagem de ausencia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String listarBatchEspecifico(String batchId, String pathFilter) {
         MutationBatch batch = mutationStore.buscarBatchPorId(batchId);
         if (batch == null) {
             return "Nenhum batch encontrado para o identificador informado.";
         }
+
+        String normalizedFilter = normalizePathFragment(pathFilter);
 
         StringBuilder sb = new StringBuilder();
         sb.append("Historico de Mutacao - Batch Especifico").append("\n");
@@ -124,15 +150,21 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
         ordenarOperacoesMaisRecentesPrimeiro(operations);
 
         for (int i = 0; i < operations.size(); i++) {
+            MutationOperation operation = operations.get(i);
+
+            if (!isBlank(normalizedFilter) && !operacaoCombinaComPath(operation, normalizedFilter)) {
+                continue;
+            }
+
             sb.append("\n");
-            sb.append(formatarOperacao(operations.get(i), i + 1));
+            sb.append(formatarOperacao(operation, i + 1));
         }
 
         return sb.toString();
     }
 
-    /** * Lista o historico geral de mutacoes com filtro opcional por caminho. * * @param pathFilter filtro opcional por caminho relativo ou trecho do path * @param limit quantidade maxima de batches retornados * @return relatorio textual do historico * * @author Renato Tomaz Nati * @since 2026-05-20 */
-    private String listarHistoricoGeral(String pathFilter, int limit) {
+    /** * Lista o historico geral de mutacoes com filtro opcional por caminho. * * @param pathFilter filtro opcional por caminho relativo * @param limit quantidade maxima de batches retornados * @param target alvo estrutural opcional * @param relativePath caminho relativo complementar opcional * @return relatorio textual do historico * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String listarHistoricoGeral(String pathFilter, int limit, String target, String relativePath) {
         List<MutationBatch> batches = mutationStore.listarBatches();
         ordenarBatchesMaisRecentesPrimeiro(batches);
 
@@ -157,6 +189,8 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
         StringBuilder sb = new StringBuilder();
         sb.append("Historico de Mutacoes do Workspace").append("\n");
         sb.append("projectRoot: ").append(normalizePath(rootDirectory)).append("\n");
+        sb.append("target: ").append(safe(target)).append("\n");
+        sb.append("relativePath: ").append(safe(relativePath)).append("\n");
         sb.append("pathFilter: ").append(safe(pathFilter)).append("\n");
         sb.append("limit: ").append(limit).append("\n");
         sb.append("totalBatchesEncontrados: ").append(filtrados.size()).append("\n");
@@ -223,6 +257,42 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
         return sb.toString();
     }
 
+    /** * Resolve o caminho relativo efetivo com base em path explicito ou em * target estrutural combinado com relativePath. * * @param path caminho relativo completo * @param target alias estrutural * @param relativePath caminho relativo dentro do contexto estrutural * @return caminho relativo final ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String resolveEffectiveRelativePath(String path, String target, String relativePath) {
+        if (!isBlank(path)) {
+            return normalizeRelativePath(path);
+        }
+
+        if (isBlank(target) || isBlank(relativePath)) {
+            return "";
+        }
+
+        String baseRelativePath = structuralTargetResolver.resolveRelativePath(target);
+        return joinRelativePath(baseRelativePath, relativePath);
+    }
+
+    /** * Une caminho relativo base e caminho relativo filho em um unico path * normalizado. * * @param baseRelativePath base relativa * @param childRelativePath filho relativo * @return caminho relativo final * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String joinRelativePath(String baseRelativePath, String childRelativePath) {
+        String base = baseRelativePath != null ? baseRelativePath.trim().replace("\\", "/") : "";
+        String child = childRelativePath != null ? childRelativePath.trim().replace("\\", "/") : "";
+
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        while (child.startsWith("/")) {
+            child = child.substring(1);
+        }
+
+        if (base.length() == 0) {
+            return child;
+        }
+        if (child.length() == 0) {
+            return base;
+        }
+
+        return base + "/" + child;
+    }
+
     /** * Retorna true quando o batch contem ao menos uma operacao cujo path seja * compatível com o filtro informado. * * @param batch batch a inspecionar * @param normalizedFilter filtro de caminho normalizado * @return true quando houver compatibilidade de path * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private boolean batchContemPath(MutationBatch batch, String normalizedFilter) {
         if (batch == null || batch.getOperations() == null) {
@@ -271,7 +341,7 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
         });
     }
 
-    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * <p>O formato segue a mesma estrategia defensiva usada na camada de * memoria persistente e mutacao, preservando nome base normalizado e hash * curto da raiz canonica.</p> * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarProjectKey(File rootDirectory) {
         if (rootDirectory == null) {
             return "unknown_project";
@@ -326,6 +396,19 @@ public class ListWorkspaceMutationHistoryTool implements AgentTool, AgentToolPro
         }
 
         return path.trim().replace("\\", "/").toLowerCase();
+    }
+
+    /** * Normaliza um caminho relativo para o formato com barras normais. * * @param path caminho relativo original * @return caminho normalizado * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String normalizeRelativePath(String path) {
+        if (path == null) {
+            return "";
+        }
+
+        String normalized = path.trim().replace("\\", "/");
+        while (normalized.startsWith("/")) {
+            normalized = normalized.substring(1);
+        }
+        return normalized;
     }
 
     /** * Normaliza caminho fisico para formato com barras normais. * * @param file arquivo de origem * @return caminho normalizado * * @author Renato Tomaz Nati * @since 2026-05-20 */

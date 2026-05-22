@@ -7,11 +7,12 @@ import java.util.List;
 import com.mcp.sailibrary.plugin.agent.AgentTool;
 import com.mcp.sailibrary.plugin.agent.context.mutation.JGitWorkspaceRepository;
 import com.mcp.sailibrary.plugin.agent.context.mutation.ProjectMutationStore;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
-/** * Inspeciona o estado atual da infraestrutura de mutacao do workspace para o * projeto ativo. * * <p>Esta tool fornece uma visao tática e somente leitura sobre o estado do * journal de mutacoes, pilhas de undo/redo e repositorio interno versionado. * O objetivo e permitir que a IA avalie se ha historico suficiente e se o * ambiente esta consistente antes de tentar undo, redo ou restauracoes * seletivas.</p> * * <p>Nenhuma alteracao e aplicada no workspace real, no espelho interno ou no * journal semantico. Esta tool apenas coleta e formata o estado atual.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+
+/** * Inspeciona o estado atual da infraestrutura de mutacao do workspace para o * projeto ativo. * * <p>Esta tool fornece uma visao tatica e somente leitura sobre o estado do * journal de mutacoes, pilhas de undo/redo e repositorio interno versionado. * O objetivo e permitir que a IA avalie se ha historico suficiente e se o * ambiente esta consistente antes de tentar undo, redo ou restauracoes * seletivas.</p> * * <p>Nenhuma alteracao e aplicada no workspace real, no espelho interno ou no * journal semantico. Esta tool apenas coleta e formata o estado atual.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class InspectWorkspaceMutationStateTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private final File rootDirectory;
@@ -34,6 +35,7 @@ public class InspectWorkspaceMutationStateTool implements AgentTool, AgentToolPr
     public String getName() {
         return "inspecionar_estado_mutacao_workspace";
     }
+
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -62,6 +64,8 @@ public class InspectWorkspaceMutationStateTool implements AgentTool, AgentToolPr
 
         return metadata;
     }
+
+    /** * Executa a leitura do estado atual da infraestrutura de mutacao. * * @param jsonParameters parametros JSON da ferramenta * @return relatorio textual do estado atual * * @author Renato Tomaz Nati * @since 2026-05-20 */
     @Override
     public String execute(String jsonParameters) {
         int recentCommitLimit = ToolJsonSupport.extractJsonIntValue(jsonParameters, "recentCommitLimit", 5, 1, 50);
@@ -151,7 +155,7 @@ public class InspectWorkspaceMutationStateTool implements AgentTool, AgentToolPr
         }
     }
 
-    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * <p>O formato segue a mesma estrategia defensiva usada na camada de * memoria persistente e mutacao, preservando nome base normalizado e hash * curto da raiz canonica.</p> * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarProjectKey(File rootDirectory) {
         if (rootDirectory == null) {
             return "unknown_project";

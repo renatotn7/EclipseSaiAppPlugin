@@ -2,9 +2,9 @@ package com.mcp.sailibrary.plugin.chat.context.service;
 
 import java.util.Set;
 
-import com.mcp.sailibrary.plugin.SaiLibraryMcpClient;
 import com.mcp.sailibrary.plugin.chat.context.model.NamedContextTargetRole;
 import com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContextType;
+import com.mcp.sailibrary.plugin.mcp.SaiLibraryMcpClient;
 
 /* yaml_header: version: "1.0" purpose: "Sugerir nomes curtos para alvos estruturais usando IA com fallback local seguro." libraries: - com.mcp.sailibrary.plugin.SaiLibraryMcpClient: projeto */
 public class ContextTargetNameSuggestionService {

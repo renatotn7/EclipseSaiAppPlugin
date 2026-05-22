@@ -7,11 +7,12 @@ import com.mcp.sailibrary.plugin.agent.AgentTool;
 import com.mcp.sailibrary.plugin.agent.context.mutation.WorkspaceMutationFacade;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationContext;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationOrigin;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
-/** * Apaga arquivo previamente permitido pela politica de mutacao, registrando a * operacao na infraestrutura versionada interna do plugin. * * <p>Esta implementacao preserva o contrato funcional da tool, incluindo o uso * do parametro path como identificador principal do arquivo a ser removido. A * diferenca principal e que agora a remocao passa pela * {@link WorkspaceMutationFacade}, reduzindo duplicacao de logica e preparando * o caminho para undo e redo sem regressao do comportamento existente.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+
+/** * Apaga arquivo previamente permitido pela politica de mutacao, registrando a * operacao na infraestrutura versionada interna do plugin. * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class DeleteCreatedProjectFileTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private final File rootDirectory;
@@ -65,6 +66,7 @@ public class DeleteCreatedProjectFileTool implements AgentTool, AgentToolPromptM
             return "Falha ao apagar arquivo no projeto: " + e.getMessage();
         }
     }
+
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -107,7 +109,8 @@ public class DeleteCreatedProjectFileTool implements AgentTool, AgentToolPromptM
 
         return metadata;
     }
-    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * <p>O formato segue a mesma estrategia defensiva usada na camada de * memoria persistente e mutacao, preservando nome base normalizado e hash * curto da raiz canonica.</p> * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+
+    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarProjectKey(File rootDirectory) {
         if (rootDirectory == null) {
             return "unknown_project";
@@ -155,7 +158,7 @@ public class DeleteCreatedProjectFileTool implements AgentTool, AgentToolPromptM
         return normalized;
     }
 
-    /** * Detecta a branch atual do projeto a partir do arquivo .git/HEAD, quando * disponivel. * * @param projectRoot raiz fisica do projeto * @return nome da branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Detecta a branch atual do projeto a partir do arquivo .git/HEAD. * * @param projectRoot raiz fisica do projeto * @return nome da branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String detectarBranchAtual(File projectRoot) {
         if (projectRoot == null) {
             return "";
@@ -188,7 +191,7 @@ public class DeleteCreatedProjectFileTool implements AgentTool, AgentToolPromptM
         }
     }
 
-    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a ser validado * @return true quando o valor estiver em branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a validar * @return true quando o valor estiver em branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private boolean isBlank(String value) {
         return value == null || value.trim().length() == 0;
     }

@@ -7,11 +7,11 @@ import com.mcp.sailibrary.plugin.agent.AgentTool;
 import com.mcp.sailibrary.plugin.agent.context.mutation.WorkspaceMutationFacade;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationContext;
 import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationOrigin;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
-import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
-/** * Desfaz o ultimo batch de mutacao registrado na infraestrutura versionada * interna do plugin. * * <p>Esta implementacao preserva o contrato simples de tool autonoma e delega * a logica efetiva de restauracao para a {@link WorkspaceMutationFacade}. A * primeira versao opera sobre o ultimo batch disponivel na pilha de undo, * evitando comportamento ambiguo enquanto o suporte a undo seletivo por path * ou batch especifico ainda nao foi expandido na fachada.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+
+/** * Desfaz o ultimo batch de mutacao registrado na infraestrutura versionada * interna do plugin. * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class UndoWorkspaceMutationTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private final File rootDirectory;
@@ -60,21 +60,6 @@ public class UndoWorkspaceMutationTool implements AgentTool, AgentToolPromptMeta
         }
     }
 
-    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * <p>O formato segue a mesma estrategia defensiva usada na camada de * memoria persistente e mutacao, preservando nome base normalizado e hash * curto da raiz canonica.</p> * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
-    private String gerarProjectKey(File rootDirectory) {
-        if (rootDirectory == null) {
-            return "unknown_project";
-        }
-
-        try {
-            String canonicalPath = rootDirectory.getCanonicalPath();
-            String baseName = rootDirectory.getName();
-            String hash = gerarHashCurto(canonicalPath);
-            return normalizarNome(baseName) + "_" + hash;
-        } catch (Exception e) {
-            return normalizarNome(rootDirectory.getName()) + "_fallback";
-        }
-    }
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -96,6 +81,23 @@ public class UndoWorkspaceMutationTool implements AgentTool, AgentToolPromptMeta
 
         return metadata;
     }
+
+    /** * Gera a chave estavel do projeto com base na raiz fisica informada. * * @param rootDirectory raiz fisica do projeto * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String gerarProjectKey(File rootDirectory) {
+        if (rootDirectory == null) {
+            return "unknown_project";
+        }
+
+        try {
+            String canonicalPath = rootDirectory.getCanonicalPath();
+            String baseName = rootDirectory.getName();
+            String hash = gerarHashCurto(canonicalPath);
+            return normalizarNome(baseName) + "_" + hash;
+        } catch (Exception e) {
+            return normalizarNome(rootDirectory.getName()) + "_fallback";
+        }
+    }
+
     /** * Gera hash curto deterministico para a raiz canonica do projeto. * * @param value valor base para hash * @return hash curto em hexadecimal * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarHashCurto(String value) {
         try {
@@ -128,7 +130,7 @@ public class UndoWorkspaceMutationTool implements AgentTool, AgentToolPromptMeta
         return normalized;
     }
 
-    /** * Detecta a branch atual do projeto a partir do arquivo .git/HEAD, quando * disponivel. * * @param projectRoot raiz fisica do projeto * @return nome da branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Detecta a branch atual do projeto a partir do arquivo .git/HEAD. * * @param projectRoot raiz fisica do projeto * @return nome da branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String detectarBranchAtual(File projectRoot) {
         if (projectRoot == null) {
             return "";
@@ -161,7 +163,7 @@ public class UndoWorkspaceMutationTool implements AgentTool, AgentToolPromptMeta
         }
     }
 
-    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a ser validado * @return true quando o valor estiver em branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a validar * @return true quando o valor estiver em branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private boolean isBlank(String value) {
         return value == null || value.trim().length() == 0;
     }

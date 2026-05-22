@@ -27,4 +27,4 @@ Require-Bundle: org.eclipse.ui,
 Bundle-RequiredExecutionEnvironment: JavaSE-21
 Automatic-Module-Name: com.mcp.sailibrary.plugin
 Bundle-ActivationPolicy: lazy
-Bundle-ClassPath: ., lib/gson-2.14.0.jar, lib/vineflower-1.12.0.jar, lib/org.eclipse.jgit-7.4.jar
+Bundle-ClassPath: ., lib/gson-2.14.0.jar, lib/vineflower-1.12.0.jar, lib/org.eclipse.jgit-7.4.jar, lib/slf4j-api-2.0.17.jar, lib/slf4j-simple-2.0.17.jar

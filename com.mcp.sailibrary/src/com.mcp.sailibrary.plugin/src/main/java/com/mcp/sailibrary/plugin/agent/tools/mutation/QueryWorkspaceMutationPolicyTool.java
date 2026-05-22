@@ -3,20 +3,25 @@ package com.mcp.sailibrary.plugin.agent.tools.mutation;
 import java.io.File;
 
 import com.mcp.sailibrary.plugin.agent.AgentTool;
-import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
-import com.mcp.sailibrary.plugin.chat.context.service.SafeWorkspaceMutationPolicy;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
-/* yaml_header: version: "1.0" purpose: "Consultar a politica de mutacao segura para arquivos, packages e pastas antes de criar, alterar ou apagar." libraries: - java.io.File: runtime */
+import com.mcp.sailibrary.plugin.agent.tools.support.StructuralTargetResolver;
+import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
+import com.mcp.sailibrary.plugin.chat.context.service.SafeWorkspaceMutationPolicy;
+
+/** * Consulta a politica de mutacao segura para arquivos, packages e pastas antes * de criar, alterar ou apagar. * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class QueryWorkspaceMutationPolicyTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private final File rootDirectory;
     private final SafeWorkspaceMutationPolicy mutationPolicy;
+    private final StructuralTargetResolver structuralTargetResolver;
 
+    /** * Inicializa a ferramenta com a raiz segura, politica de mutacao e * resolvedor de aliases estruturais. * * @param rootDirectory raiz segura do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public QueryWorkspaceMutationPolicyTool(File rootDirectory) {
         this.rootDirectory = rootDirectory;
         this.mutationPolicy = new SafeWorkspaceMutationPolicy(rootDirectory);
+        this.structuralTargetResolver = new StructuralTargetResolver(rootDirectory);
     }
 
     @Override
@@ -38,13 +43,15 @@ public class QueryWorkspaceMutationPolicyTool implements AgentTool, AgentToolPro
         String normalizedOperation = operation.trim().toLowerCase();
 
         if ("create_file".equals(normalizedOperation)) {
-            boolean allowed = mutationPolicy.canCreateFile(target, relativePath);
-            return buildResult("create_file", allowed, target, relativePath, "");
+            File baseDirectory = structuralTargetResolver.resolveBaseDirectory(target);
+            boolean allowed = mutationPolicy.canCreateFile(target, relativePath) && baseDirectory != null;
+            return buildResult("create_file", allowed, target, relativePath, baseDirectory != null ? normalizePath(baseDirectory) : "");
         }
 
         if ("create_package".equals(normalizedOperation)) {
-            boolean allowed = mutationPolicy.canCreatePackage(target, relativePath);
-            return buildResult("create_package", allowed, target, relativePath, "");
+            File baseDirectory = structuralTargetResolver.resolveBaseDirectory(target);
+            boolean allowed = mutationPolicy.canCreatePackage(target, relativePath) && baseDirectory != null;
+            return buildResult("create_package", allowed, target, relativePath, baseDirectory != null ? normalizePath(baseDirectory) : "");
         }
 
         if ("update_file".equals(normalizedOperation)) {
@@ -68,6 +75,7 @@ public class QueryWorkspaceMutationPolicyTool implements AgentTool, AgentToolPro
 
         return "Erro Operacional: Operation nao suportada. Valores aceitos: create_file, create_package, update_file, delete_file.";
     }
+
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -117,6 +125,8 @@ public class QueryWorkspaceMutationPolicyTool implements AgentTool, AgentToolPro
 
         return metadata;
     }
+
+    /** * Resolve o arquivo alvo para update/delete. * * @param path caminho informado * @return arquivo resolvido * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private File resolveTargetFile(String path) {
         if (isBlank(path)) {
             return null;
@@ -130,7 +140,8 @@ public class QueryWorkspaceMutationPolicyTool implements AgentTool, AgentToolPro
         return new File(rootDirectory, path);
     }
 
-    private String buildResult(String operation, boolean allowed, String target, String path, String backupPath) {
+    /** * Monta relatorio textual da politica de mutacao consultada. * * @param operation operacao consultada * @param allowed flag de permissao * @param target alvo logico * @param path caminho consultado * @param detail detalhe adicional como backup path ou base path * @return relatorio textual * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String buildResult(String operation, boolean allowed, String target, String path, String detail) {
         StringBuilder sb = new StringBuilder();
         sb.append("Relatorio de Politica de Mutacao\n");
         sb.append("operation: ").append(operation).append("\n");
@@ -138,8 +149,12 @@ public class QueryWorkspaceMutationPolicyTool implements AgentTool, AgentToolPro
         sb.append("path: ").append(path != null ? path : "").append("\n");
         sb.append("allowed: ").append(allowed ? "true" : "false").append("\n");
 
-        if (backupPath != null && backupPath.trim().length() > 0) {
-            sb.append("backupPath: ").append(backupPath).append("\n");
+        if (detail != null && detail.trim().length() > 0) {
+            if ("update_file".equals(operation)) {
+                sb.append("backupPath: ").append(detail).append("\n");
+            } else {
+                sb.append("resolvedBasePath: ").append(detail).append("\n");
+            }
         }
 
         if (allowed) {
@@ -151,6 +166,7 @@ public class QueryWorkspaceMutationPolicyTool implements AgentTool, AgentToolPro
         return sb.toString();
     }
 
+    /** * Normaliza caminho fisico para formato com barras normais. * * @param file arquivo de origem * @return caminho normalizado * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String normalizePath(File file) {
         try {
             return file.getCanonicalPath().replace("\\", "/");
@@ -159,6 +175,7 @@ public class QueryWorkspaceMutationPolicyTool implements AgentTool, AgentToolPro
         }
     }
 
+    /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a validar * @return true quando o valor estiver em branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private boolean isBlank(String value) {
         return value == null || value.trim().length() == 0;
     }
