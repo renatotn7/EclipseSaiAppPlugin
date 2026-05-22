@@ -1,4 +1,4 @@
-# SAI App - Chat IA para Eclipse
+# SAI App - Chat/Agente de IA para Eclipse
 
 Um poderoso agente de IA para projetos Java 🚀
 
