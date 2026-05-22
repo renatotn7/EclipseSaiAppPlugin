@@ -1,0 +1,17 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<?artifactRepository version='1.1.0'?>
+<artifacts size='1'>
+  <artifact classifier='org.eclipse.update.feature' id='com.mcp.sailibrary.feature' version='1.0.0.202605212301'>
+    <properties size='9'>
+      <property name='artifact.size' value='561'/>
+      <property name='download.size' value='561'/>
+      <property name='download.checksum.sha-512' value='50639409293d8c0561cc0b2069301516d81a804555d4b03bbcbd409ec7151d7e89c9933faa38d8e2050176b44416887515aad1c545ebcd723bf57cc5a54bc10c'/>
+      <property name='download.checksum.sha-256' value='a04da3f69a3549c7c220f4c75b5c32a052948fbfd1cd0a4ababb0b3e3522a5eb'/>
+      <property name='maven-groupId' value='com.mcp'/>
+      <property name='maven-artifactId' value='com.mcp.sailibrary.feature'/>
+      <property name='maven-version' value='1.0.0-SNAPSHOT'/>
+      <property name='maven-type' value='eclipse-feature'/>
+      <property name='download.contentType' value='application/zip'/>
+    </properties>
+  </artifact>
+</artifacts>

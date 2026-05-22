@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Data: 14-05-2026 21:55
+Objetivo: Carregamento antecipado (Core Extension) do Tycho 5.
+Isso educa o Maven e a IDE sobre os pacotes eclipse-* antes de qualquer parser de POM,
+evitando falhas de resolucao de variaveis.
+Chamador: Maven Core Bootstrapper
+Chamado: Tycho Build Extension
+-->
+<extensions>
+  <extension>
+    <groupId>org.eclipse.tycho</groupId>
+    <artifactId>tycho-build</artifactId>
+    <version>5.0.2</version>
+  </extension>
+</extensions>

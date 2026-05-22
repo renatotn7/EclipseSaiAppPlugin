@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<site>
+<!--
+Data: 14-05-2026 17:51
+A versao numerica restrita foi substituida por 0.0.0.
+Objetivo: Permitir que o processo de build amarre a versao dinamicamente (Late Binding),
+impedindo erros de missing dependency devido a variacoes de qualifier/timestamp.
+-->
+<feature url="features/com.mcp.sailibrary.feature-1.0.0-SNAPSHOT.jar" id="com.mcp.sailibrary.feature" version="0.0.0">
+</feature>
+</site>

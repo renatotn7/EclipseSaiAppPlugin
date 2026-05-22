@@ -1,0 +1,21 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: SAI Library MCP Plugin
+Bundle-SymbolicName: com.mcp.sailibrary.plugin;singleton:=true
+Bundle-Version: 1.0.0.202605212301
+Bundle-Activator: com.mcp.sailibrary.plugin.Activator
+Bundle-Vendor: SaiLibraryMCPPlugin
+Require-Bundle: org.eclipse.ui,org.eclipse.ui.ide,org.eclipse.ui.navigat
+ or,org.eclipse.core.runtime,org.eclipse.jface,org.eclipse.jface.text,or
+ g.eclipse.ui.editors,org.eclipse.core.resources,org.eclipse.jdt.core,or
+ g.eclipse.jdt.ui,org.eclipse.swt,org.eclipse.pde.core;resolution:=optio
+ nal,org.eclipse.pde.ui;resolution:=optional,org.eclipse.m2e.core;resolu
+ tion:=optional,org.eclipse.m2e.core.ui;resolution:=optional,org.eclipse
+ .m2e.editor;resolution:=optional,org.eclipse.m2e.jdt;resolution:=option
+ al,org.eclipse.m2e.jdt.ui;resolution:=optional,org.eclipse.m2e.maven.ru
+ ntime;resolution:=optional
+Automatic-Module-Name: com.mcp.sailibrary.plugin
+Bundle-ActivationPolicy: lazy
+Bundle-ClassPath: ., lib/gson-2.14.0.jar, lib/vineflower-1.12.0.jar
+Require-Capability: osgi.ee;filter:="(&(osgi.ee=JavaSE)(version=21))"
+
