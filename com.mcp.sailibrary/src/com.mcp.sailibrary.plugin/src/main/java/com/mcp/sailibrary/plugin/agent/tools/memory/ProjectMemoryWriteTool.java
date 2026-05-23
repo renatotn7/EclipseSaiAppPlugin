@@ -5,24 +5,20 @@ import java.io.File;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mcp.sailibrary.plugin.agent.AgentTool;
+import com.mcp.sailibrary.plugin.agent.context.ResolvedProjectScope;
 import com.mcp.sailibrary.plugin.agent.context.SourceInsightSupport;
 import com.mcp.sailibrary.plugin.agent.context.analise.ProjectMemoryStore;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
 
-/** * --- * yaml_header: * version: "1.0" * dependencies: * - java.io.File * - com.google.gson * - com.mcp.sailibrary.plugin.agent.memory.ProjectMemoryStore * purpose: "Expor gravacao controlada da memoria persistente do projeto para a camada de agentes." * design_pattern: "Command / Facade" * --- */
+/** * Expor gravacao controlada da memoria persistente do projeto para a camada de * agentes. * * <p>Esta ferramenta foi ajustada para resolver de forma mais estavel o * diretorio efetivo do projeto, reduzindo risco de fragmentacao de memoria em * cenarios Maven multimodulo e multiplos `.project`.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class ProjectMemoryWriteTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private File rootDirectory;
     private SourceInsightSupport support;
 
-    /**
- * Inicializa a ferramenta de gravacao da memoria persistente do projeto.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Inicializa a ferramenta de gravacao da memoria persistente do projeto. * * @param rootDirectory raiz segura do projeto atual * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public ProjectMemoryWriteTool(File rootDirectory) {
         this.rootDirectory = rootDirectory;
         this.support = new SourceInsightSupport();
@@ -32,6 +28,7 @@ public class ProjectMemoryWriteTool implements AgentTool, AgentToolPromptMetadat
     public String getName() {
         return "registrar_memoria_projeto";
     }
+
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -49,7 +46,7 @@ public class ProjectMemoryWriteTool implements AgentTool, AgentToolPromptMetadat
         AgentToolParameterMetadata path = new AgentToolParameterMetadata();
         path.setName("path");
         path.setRequired(false);
-        path.setDescription("Caminho relativo usado para resolver a raiz segura do projeto.");
+        path.setDescription("Caminho relativo usado para resolver o escopo efetivo do projeto.");
         path.setExampleValue("src/main/java");
         metadata.addParameter(path);
 
@@ -102,12 +99,8 @@ public class ProjectMemoryWriteTool implements AgentTool, AgentToolPromptMetadat
 
         return metadata;
     }
-    /**
- * Registra hints genericos, snapshots e historico de uso do projeto.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+
+    /** * Registra hints genericos, snapshots e historico de uso do projeto. * * @param jsonParameters parametros JSON da ferramenta * @return resultado textual do registro * * @author Renato Tomaz Nati * @since 2026-05-20 */
     @Override
     public String execute(String jsonParameters) {
         File projetoRaiz = resolverProjetoRaiz(jsonParameters);
@@ -143,24 +136,28 @@ public class ProjectMemoryWriteTool implements AgentTool, AgentToolPromptMetadat
         return "Erro Operacional: Modo de registro nao suportado. Valores aceitos: pattern, project_memory, dependency_snapshot, tool_history.";
     }
 
-    /**
- * Resolve a raiz segura do projeto para gravacao local persistente.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Resolve a raiz efetiva do projeto para gravacao local persistente. * * <p>O metodo usa o escopo resolvido do projeto e prioriza: * <ol> * <li>projeto Eclipse mais proximo</li> * <li>modulo Maven mais proximo</li> * <li>raiz segura global</li> * </ol> * </p> * * @param jsonParameters parametros JSON da ferramenta * @return raiz efetiva do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private File resolverProjetoRaiz(String jsonParameters) {
         String requestedPath = support.extrairValorVariavel(jsonParameters, "path");
         File pontoInicial = support.resolverPontoInicial(rootDirectory, requestedPath);
-        return support.localizarRaizSeguraProjeto(pontoInicial, rootDirectory);
+        ResolvedProjectScope scope = support.resolverEscopoProjeto(pontoInicial, rootDirectory);
+
+        if (scope == null) {
+            return null;
+        }
+
+        if (scope.getNearestEclipseProjectRoot() != null) {
+            return scope.getNearestEclipseProjectRoot();
+        }
+
+        if (scope.getNearestMavenModuleRoot() != null) {
+            return scope.getNearestMavenModuleRoot();
+        }
+
+        return scope.getSafeRoot();
     }
 
-    /**
- * Registra um padrao generico deduplicado e reutilizavel entre branches.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Registra um padrao generico deduplicado e reutilizavel entre branches. * * @param jsonParameters parametros JSON * @param memoryStore store de memoria persistente * @return mensagem de resultado * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String registrarPattern(String jsonParameters, ProjectMemoryStore memoryStore) {
         String kind = support.extrairValorVariavel(jsonParameters, "kind");
         String key = support.extrairValorVariavel(jsonParameters, "key");
@@ -176,12 +173,7 @@ public class ProjectMemoryWriteTool implements AgentTool, AgentToolPromptMetadat
         return "Pattern registrado com sucesso para a chave [" + key + "].";
     }
 
-    /**
- * Registra memoria estrutural estavel do projeto.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Registra memoria estrutural estavel do projeto. * * @param jsonParameters parametros JSON * @param memoryStore store de memoria persistente * @return mensagem de resultado * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String registrarProjectMemory(String jsonParameters, ProjectMemoryStore memoryStore) {
         String safeRoot = support.extrairValorVariavel(jsonParameters, "safeRoot");
         String buildTool = support.extrairValorVariavel(jsonParameters, "buildTool");
@@ -192,12 +184,7 @@ public class ProjectMemoryWriteTool implements AgentTool, AgentToolPromptMetadat
         return "Memoria estrutural do projeto atualizada com sucesso.";
     }
 
-    /**
- * Registra snapshot simples de dependencias, frameworks e modulos.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Registra snapshot simples de dependencias, frameworks e modulos. * * @param jsonParameters parametros JSON * @param memoryStore store de memoria persistente * @return mensagem de resultado * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String registrarDependencySnapshot(String jsonParameters, ProjectMemoryStore memoryStore) {
         JsonArray dependencies = extrairArraySimples(jsonParameters, "dependencies");
         JsonArray frameworks = extrairArraySimples(jsonParameters, "frameworks");
@@ -207,12 +194,7 @@ public class ProjectMemoryWriteTool implements AgentTool, AgentToolPromptMetadat
         return "Snapshot de dependencias registrado com sucesso.";
     }
 
-    /**
- * Registra historico compacto da ultima execucao de ferramenta.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Registra historico compacto da ultima execucao de ferramenta. * * @param jsonParameters parametros JSON * @param memoryStore store de memoria persistente * @return mensagem de resultado * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String registrarToolHistory(String jsonParameters, ProjectMemoryStore memoryStore) {
         String toolName = support.extrairValorVariavel(jsonParameters, "tool");
         String parametersSummary = support.extrairValorVariavel(jsonParameters, "parametersSummary");
@@ -226,12 +208,7 @@ public class ProjectMemoryWriteTool implements AgentTool, AgentToolPromptMetadat
         return "Historico da ferramenta [" + toolName + "] registrado com sucesso.";
     }
 
-    /**
- * Extrai array simples do JSON recebido, com fallback para array vazio.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Extrai array simples do JSON recebido, com fallback para array vazio. * * @param jsonParameters texto JSON * @param chave chave do array * @return array encontrado ou vazio * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private JsonArray extrairArraySimples(String jsonParameters, String chave) {
         JsonArray array = new JsonArray();
 

@@ -2,22 +2,29 @@ package com.mcp.sailibrary.plugin.chat.blocks.views;
 
 import java.util.List;
 
+import org.eclipse.jface.resource.ImageDescriptor;
 import org.eclipse.swt.SWT;
+import org.eclipse.swt.graphics.Cursor;
+import org.eclipse.swt.graphics.Image;
 import org.eclipse.swt.layout.GridData;
 import org.eclipse.swt.layout.GridLayout;
 import org.eclipse.swt.widgets.Button;
 import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
+import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.Group;
 import org.eclipse.swt.widgets.Label;
 import org.eclipse.swt.widgets.Link;
+import org.eclipse.ui.plugin.AbstractUIPlugin;
 
+import com.mcp.sailibrary.plugin.Activator;
 import com.mcp.sailibrary.plugin.chat.blocks.controllers.NamedBlocksController;
 import com.mcp.sailibrary.plugin.chat.blocks.model.NamedCodeBlock;
 import com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContext;
 import com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContextType;
+import com.mcp.sailibrary.plugin.chat.views.ChatView;
 
-/* yaml_header: version: "1.0" purpose: "Exibir e gerenciar contexto hibrido da sessao: blocos textuais e contextos estruturais." libraries: - org.eclipse.swt.widgets.Composite: runtime - org.eclipse.swt.widgets.Link: runtime - java.util.List: runtime */
+/** * Exibe e gerencia o contexto hibrido da sessao, incluindo blocos textuais e * contextos estruturais nomeados. * * <p>O painel permite: * <ul> * <li>adicionar selecoes como blocos textuais</li> * <li>listar contextos estruturais e textuais</li> * <li>focar um contexto no editor</li> * <li>remover contextos</li> * <li>inserir aliases na conversa via botao dedicado</li> * </ul> * </p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class NamedBlocksPanel extends Composite implements NamedBlocksHost {
 
     private NamedBlocksController controller;
@@ -48,8 +55,28 @@ public class NamedBlocksPanel extends Composite implements NamedBlocksHost {
     private Button btnRefresh;
     private Button btnClear;
 
+    private ChatView chatView;
+
+    private java.util.List<Image> imagensBotoes = new java.util.ArrayList<Image>();
+
+    private Image imgAddPrimary;
+    private Image imgAddEditable;
+    private Image imgAddReference;
+    private Image imgRefresh;
+    private Image imgClearAll;
+    private Image imgAlias;
+    private Image imgRemove;
+
+    /** * Inicializa o painel sem associacao direta com a view principal do chat. * * @param parent componente pai * @param style estilo SWT * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public NamedBlocksPanel(Composite parent, int style) {
+        this(parent, style, null);
+    }
+
+    /** * Inicializa o painel de contextos nomeados da sessao. * * @param parent componente pai * @param style estilo SWT * @param chatView view principal de conversa, quando disponivel * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    public NamedBlocksPanel(Composite parent, int style, ChatView chatView) {
         super(parent, style);
+
+        this.chatView = chatView;
 
         GridLayout selfLayout = new GridLayout(1, false);
         selfLayout.marginWidth = 0;
@@ -57,10 +84,83 @@ public class NamedBlocksPanel extends Composite implements NamedBlocksHost {
         selfLayout.verticalSpacing = 0;
         setLayout(selfLayout);
 
+        carregarImagens();
+
         this.controller = new NamedBlocksController(this);
         createContent();
     }
 
+    @Override
+    public void inserirAliasNaConversa(String alias) {
+        if (chatView != null) {
+            chatView.anexarAliasNaEntrada(alias);
+        }
+    }
+
+    /** * Carrega as imagens usadas pelos botoes do painel. * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private void carregarImagens() {
+    	imgAddPrimary = carregarImagem("icons/ui/star_icon32.png");
+    	imgAddEditable = carregarImagem("icons/ui/edit_icon32.png");
+    	imgAddReference = carregarImagem("icons/ui/bookmark_icon32.png");
+    	imgRefresh = carregarImagem("icons/ui/atualizar_icon32.png");
+    	imgClearAll = carregarImagem("icons/ui/limpar_contextos32.png");
+    	imgAlias = carregarImagem("icons/ui/contagotas_icon32.png");
+    	imgRemove = carregarImagem("icons/ui/lixeira_icon32.png");
+    }
+    /** * Cria um label com imagem clicavel para uso como acao compacta na interface. * * @param parent componente pai * @param image imagem a ser exibida * @param tooltip tooltip da acao * @param runnable acao a executar no clique * @return label configurado * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Cria um label com imagem clicavel para uso como acao compacta na interface. * * @param parent componente pai * @param image imagem a ser exibida * @param tooltip tooltip da acao * @param runnable acao a executar no clique * @return label configurado * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private Label criarImagemClicavel(Composite parent, Image image, String tooltip, final Runnable runnable) {
+        Label label = new Label(parent, SWT.NONE);
+        label.setToolTipText(tooltip);
+
+        if (image != null) {
+            label.setImage(image);
+        } else {
+            label.setText("?");
+        }
+
+        GridData gd = new GridData(SWT.LEFT, SWT.CENTER, false, false);
+        gd.widthHint = 32;
+        gd.heightHint = 32;
+        label.setLayoutData(gd);
+
+        label.setCursor(parent.getDisplay().getSystemCursor(SWT.CURSOR_HAND));
+        label.addListener(SWT.MouseDown, event -> {
+            if (runnable != null) {
+                runnable.run();
+            }
+        });
+
+        return label;
+    }
+    /** * Carrega uma imagem do plugin e a registra para descarte posterior. * * @param caminho caminho relativo da imagem no plugin * @return imagem carregada ou null * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private Image carregarImagem(String caminho) {
+        try {
+            System.out.println("[IMG DEBUG] Tentando carregar: " + caminho + " | plugin=" + Activator.PLUGIN_ID);
+
+            ImageDescriptor descriptor = AbstractUIPlugin.imageDescriptorFromPlugin(Activator.PLUGIN_ID, caminho);
+            if (descriptor == null) {
+                System.out.println("[IMG DEBUG] Descriptor nulo para: " + caminho);
+                return null;
+            }
+
+            Image image = descriptor.createImage(Display.getDefault());
+            if (image == null) {
+                System.out.println("[IMG DEBUG] createImage retornou null para: " + caminho);
+                return null;
+            }
+
+            imagensBotoes.add(image);
+            System.out.println("[IMG DEBUG] Imagem carregada com sucesso: " + caminho);
+            return image;
+        } catch (Exception e) {
+            System.out.println("[IMG DEBUG] Falha ao carregar imagem: " + caminho + " -> " + e.getMessage());
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+    /** * Constroi o conteudo visual principal do painel. * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private void createContent() {
         rootContainer = new Composite(this, SWT.NONE);
         GridLayout layout = new GridLayout(1, false);
@@ -83,40 +183,74 @@ public class NamedBlocksPanel extends Composite implements NamedBlocksHost {
         controller.refreshHighlights();
     }
 
+    /** * Cria os botoes principais de acao do painel. * * @param parent componente pai * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private void criarAcoes(Composite parent) {
         Group group = new Group(parent, SWT.NONE);
         group.setText("Contexto");
         group.setLayout(new GridLayout(5, false));
         group.setLayoutData(new GridData(SWT.FILL, SWT.TOP, true, false));
 
-        btnAddPrimary = new Button(group, SWT.PUSH);
-        btnAddPrimary.setText("Adicionar Principal");
-        btnAddPrimary.setToolTipText("Adiciona a selecao atual do editor como bloco principal da analise.");
-        btnAddPrimary.addListener(SWT.Selection, event -> controller.adicionarSelecaoComoPrincipal());
+        criarImagemClicavel(
+                group,
+                imgAddPrimary,
+                "Adicionar Principal",
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        controller.adicionarSelecaoComoPrincipal();
+                    }
+                }
+        );
 
-        btnAddEditable = new Button(group, SWT.PUSH);
-        btnAddEditable.setText("Adicionar Editavel");
-        btnAddEditable.setToolTipText("Adiciona a selecao atual do editor como bloco editavel.");
-        btnAddEditable.addListener(SWT.Selection, event -> controller.adicionarSelecaoComoEditavel());
+        criarImagemClicavel(
+                group,
+                imgAddEditable,
+                "Adicionar Editavel",
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        controller.adicionarSelecaoComoEditavel();
+                    }
+                }
+        );
 
-        btnAddReference = new Button(group, SWT.PUSH);
-        btnAddReference.setText("Adicionar Referencia");
-        btnAddReference.setToolTipText("Adiciona a selecao atual do editor como bloco referencial.");
-        btnAddReference.addListener(SWT.Selection, event -> controller.adicionarSelecaoComoReferencia());
+        criarImagemClicavel(
+                group,
+                imgAddReference,
+                "Adicionar Referencia",
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        controller.adicionarSelecaoComoReferencia();
+                    }
+                }
+        );
 
-        btnRefresh = new Button(group, SWT.PUSH);
-        btnRefresh.setText("Atualizar");
-        btnRefresh.setToolTipText("Atualiza a lista de contextos e reaplica os destaques no editor.");
-        btnRefresh.addListener(SWT.Selection, event -> {
-            controller.refreshView();
-            controller.refreshHighlights();
-            adicionarMensagemStatus("Contexto atualizado.");
-        });
+        criarImagemClicavel(
+                group,
+                imgRefresh,
+                "Atualizar",
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        controller.refreshView();
+                        controller.refreshHighlights();
+                        adicionarMensagemStatus("Contexto atualizado.");
+                    }
+                }
+        );
 
-        btnClear = new Button(group, SWT.PUSH);
-        btnClear.setText("Limpar Sessao");
-        btnClear.setToolTipText("Remove todos os contextos da sessao atual.");
-        btnClear.addListener(SWT.Selection, event -> controller.limparTudo());
+        criarImagemClicavel(
+                group,
+                imgClearAll,
+                "Limpar Sessao",
+                new Runnable() {
+                    @Override
+                    public void run() {
+                        controller.limparTudo();
+                    }
+                }
+        );
     }
 
     private void criarListaPrincipal(Composite parent) {
@@ -302,7 +436,7 @@ public class NamedBlocksPanel extends Composite implements NamedBlocksHost {
             }
 
             Composite row = new Composite(container, SWT.NONE);
-            GridLayout layout = new GridLayout(2, false);
+            GridLayout layout = new GridLayout(3, false);
             layout.marginWidth = 0;
             layout.marginHeight = 0;
             layout.horizontalSpacing = 6;
@@ -320,15 +454,29 @@ public class NamedBlocksPanel extends Composite implements NamedBlocksHost {
                 }
             });
 
-            Button remove = new Button(row, SWT.PUSH);
-            remove.setText("Remover");
-            remove.setToolTipText("Remover bloco " + safe(block.getName()));
-            remove.addListener(SWT.Selection, new org.eclipse.swt.widgets.Listener() {
-                @Override
-                public void handleEvent(org.eclipse.swt.widgets.Event event) {
-                    controller.removerBloco(block.getName());
-                }
-            });
+            criarImagemClicavel(
+                    row,
+                    imgAlias,
+                    "Inserir @" + safe(block.getName()) + " na conversa",
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            controller.inserirAliasNaConversa(block.getName());
+                        }
+                    }
+            );
+
+            criarImagemClicavel(
+                    row,
+                    imgRemove,
+                    "Remover bloco " + safe(block.getName()),
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            controller.removerBloco(block.getName());
+                        }
+                    }
+            );
         }
 
         if (container.getChildren().length == 0) {
@@ -360,7 +508,7 @@ public class NamedBlocksPanel extends Composite implements NamedBlocksHost {
             }
 
             Composite row = new Composite(container, SWT.NONE);
-            GridLayout layout = new GridLayout(2, false);
+            GridLayout layout = new GridLayout(3, false);
             layout.marginWidth = 0;
             layout.marginHeight = 0;
             layout.horizontalSpacing = 6;
@@ -378,21 +526,50 @@ public class NamedBlocksPanel extends Composite implements NamedBlocksHost {
                 }
             });
 
-            Button remove = new Button(row, SWT.PUSH);
-            remove.setText("Remover");
-            remove.setToolTipText("Remover contexto " + safe(context.getName()));
-            remove.addListener(SWT.Selection, new org.eclipse.swt.widgets.Listener() {
-                @Override
-                public void handleEvent(org.eclipse.swt.widgets.Event event) {
-                    controller.removerBloco(context.getName());
-                }
-            });
+            criarImagemClicavel(
+                    row,
+                    imgAlias,
+                    "Inserir @" + safe(context.getName()) + " na conversa",
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            controller.inserirAliasNaConversa(context.getName());
+                        }
+                    }
+            );
+
+            criarImagemClicavel(
+                    row,
+                    imgRemove,
+                    "Remover contexto " + safe(context.getName()),
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            controller.removerBloco(context.getName());
+                        }
+                    }
+            );
         }
 
         if (container.getChildren().length == 0) {
             Label vazio = new Label(container, SWT.NONE);
             vazio.setText("Nenhum contexto estrutural valido.");
         }
+    }
+
+    @Override
+    public void dispose() {
+        if (imagensBotoes != null) {
+            for (int i = 0; i < imagensBotoes.size(); i++) {
+                Image image = imagensBotoes.get(i);
+                if (image != null && !image.isDisposed()) {
+                    image.dispose();
+                }
+            }
+            imagensBotoes.clear();
+        }
+
+        super.dispose();
     }
 
     @Override

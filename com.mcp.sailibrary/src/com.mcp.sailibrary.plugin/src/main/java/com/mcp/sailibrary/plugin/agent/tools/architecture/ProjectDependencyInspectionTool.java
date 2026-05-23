@@ -1,7 +1,7 @@
 package com.mcp.sailibrary.plugin.agent.tools.architecture;
 
-import java.io.File;
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.List;
@@ -18,17 +18,19 @@ import org.eclipse.m2e.core.project.IMavenProjectFacade;
 import org.eclipse.m2e.core.project.IMavenProjectRegistry;
 
 import com.mcp.sailibrary.plugin.agent.AgentTool;
+import com.mcp.sailibrary.plugin.agent.context.ResolvedProjectScope;
 import com.mcp.sailibrary.plugin.agent.context.SourceInsightSupport;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
 
-/** * Inspeciona a estrutura de dependencias do projeto resolvendo o POM efetivo * via M2E com fallback defensivo por varredura fisica. * * @author Renato Tomaz Nati * @since 2026-05-20 */
+/** * Inspeciona a estrutura de dependencias do projeto resolvendo o POM efetivo * via M2E com fallback defensivo por varredura fisica. * * <p>Esta implementacao foi ajustada para respeitar melhor cenarios Maven * multimodulo e multiplos `.project`, diferenciando: * <ul> * <li>raiz segura global</li> * <li>modulo Maven mais proximo</li> * <li>pom agregador</li> * <li>projeto Eclipse mais proximo</li> * </ul> * </p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class ProjectDependencyInspectionTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private File rootDirectory;
     private SourceInsightSupport support;
 
+    /** * Inicializa a ferramenta de inspecao de dependencias. * * @param rootDirectory raiz segura do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public ProjectDependencyInspectionTool(File rootDirectory) {
         this.rootDirectory = rootDirectory;
         this.support = new SourceInsightSupport();
@@ -68,22 +70,35 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
         return metadata;
     }
 
+    /** * Executa a inspecao estrutural de dependencias. * * @param jsonParameters parametros JSON da ferramenta * @return relatorio textual da estrutura de build e dependencias * * @author Renato Tomaz Nati * @since 2026-05-20 */
     @Override
     public String execute(String jsonParameters) {
         String requestedPath = support.extrairValorVariavel(jsonParameters, "path");
 
         File pontoInicial = support.resolverPontoInicial(rootDirectory, requestedPath);
-        File raizSeguraProjeto = support.localizarRaizSeguraProjeto(pontoInicial, rootDirectory);
-        File moduloPreferencial = support.localizarModuloMavenMaisProximo(pontoInicial, raizSeguraProjeto);
-        File pomAgregador = support.localizarPomAgregador(moduloPreferencial, raizSeguraProjeto);
+        ResolvedProjectScope scope = support.resolverEscopoProjeto(pontoInicial, rootDirectory);
 
-        String buildTool = detectarBuildTool(raizSeguraProjeto);
+        if (scope == null || !scope.isUsable()) {
+            return "Erro Operacional: Nao foi possivel resolver escopo seguro do projeto para inspecao de dependencias.";
+        }
+
+        File raizSeguraProjeto = scope.getSafeRoot();
+        File moduloPreferencial = scope.getNearestMavenModuleRoot() != null
+                ? scope.getNearestMavenModuleRoot()
+                : scope.getEffectiveSearchRoot();
+        File pomAgregador = scope.getAggregatorPom();
+
+        String buildTool = detectarBuildTool(raizSeguraProjeto, moduloPreferencial);
         String branchAtual = detectarBranchAtual(raizSeguraProjeto);
 
         StringBuilder relatorio = new StringBuilder();
         relatorio.append("Relatorio estrutural do projeto").append("\n");
         relatorio.append("safeRoot: ").append(descreverArquivo(raizSeguraProjeto)).append("\n");
+        relatorio.append("nearestEclipseProject: ").append(descreverArquivo(scope.getNearestEclipseProjectRoot())).append("\n");
+        relatorio.append("nearestEclipseProjectName: ").append(valorSeguro(scope.getNearestEclipseProjectName())).append("\n");
         relatorio.append("moduloPreferencial: ").append(descreverArquivo(moduloPreferencial)).append("\n");
+        relatorio.append("groupIdModulo: ").append(valorSeguro(scope.getGroupIdDoModulo())).append("\n");
+        relatorio.append("groupIdAgregador: ").append(valorSeguro(scope.getGroupIdDoAgregador())).append("\n");
         relatorio.append("buildTool: ").append(buildTool).append("\n");
         relatorio.append("branchAtual: ").append(branchAtual).append("\n");
 
@@ -100,20 +115,25 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
 
         boolean resolvidoM2E = false;
         try {
-            resolvidoM2E = tentarResolverViaM2E(pomAgregador, relatorio, raizSeguraProjeto);
+            resolvidoM2E = tentarResolverViaM2E(moduloPreferencial, pomAgregador, relatorio);
         } catch (Throwable t) {
             resolvidoM2E = false;
         }
 
         if (!resolvidoM2E) {
-            executarFallbackFisico(pomAgregador, relatorio, raizSeguraProjeto);
+            executarFallbackFisico(moduloPreferencial, pomAgregador, relatorio, raizSeguraProjeto);
         }
 
         return relatorio.toString();
     }
 
-    private void executarFallbackFisico(File pomAgregador, StringBuilder relatorio, File raizSegura) {
-        String conteudoPom = support.lerConteudoArquivo(pomAgregador);
+    /** * Executa fallback fisico e estatico de analise de build quando o M2E nao * estiver disponivel ou falhar. * * @param moduloPreferencial modulo atual mais proximo * @param pomAgregador pom agregador mais alto * @param relatorio acumulador textual * @param raizSegura raiz segura do perimetro * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private void executarFallbackFisico(File moduloPreferencial, File pomAgregador, StringBuilder relatorio, File raizSegura) {
+
+        File pomPreferencial = moduloPreferencial != null ? new File(moduloPreferencial, "pom.xml") : null;
+        File pomBase = (pomPreferencial != null && pomPreferencial.exists()) ? pomPreferencial : pomAgregador;
+
+        String conteudoPom = support.lerConteudoArquivo(pomBase);
 
         relatorio.append("groupId: ").append(extrairGroupIdEfetivo(conteudoPom)).append("\n");
         relatorio.append("artifactId: ").append(extrairPrimeiraTag(conteudoPom, "artifactId")).append("\n");
@@ -169,19 +189,26 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
                 relatorio.append("- ").append(frameworks.get(i)).append("\n");
             }
         }
+
         relatorio.append("[RESOLUCAO]: Processado via Varredura Estatica Defensiva (M2E Ausente).\n");
     }
 
-    private boolean tentarResolverViaM2E(File pomFile, StringBuilder relatorio, File raizSegura) throws Exception {
+    /** * Tenta resolver o modelo efetivo via M2E usando o projeto Eclipse mais * relacionado ao pom/modulo analisado. * * @param moduloPreferencial modulo Maven mais proximo * @param pomFile pom agregador ou pom de referencia * @param relatorio acumulador textual * @return true quando a resolucao via M2E for concluida com sucesso * * @throws Exception quando houver falha grave de acesso ao M2E * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private boolean tentarResolverViaM2E(File moduloPreferencial, File pomFile, StringBuilder relatorio) throws Exception {
         IWorkspaceRoot workspaceRoot = ResourcesPlugin.getWorkspace().getRoot();
         IProject[] projects = workspaceRoot.getProjects();
         IProject projetoAlvo = null;
+
+        File referencia = moduloPreferencial != null ? moduloPreferencial : pomFile != null ? pomFile.getParentFile() : null;
+        if (referencia == null) {
+            return false;
+        }
 
         for (int i = 0; i < projects.length; i++) {
             IProject p = projects[i];
             if (p.isOpen() && p.getLocation() != null) {
                 File pFile = p.getLocation().toFile();
-                if (pomFile.getAbsolutePath().startsWith(pFile.getAbsolutePath())) {
+                if (mesmoOuRelacionado(referencia, pFile)) {
                     projetoAlvo = p;
                     break;
                 }
@@ -260,6 +287,7 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
         return true;
     }
 
+    /** * Carrega o pom do parent a partir do repositorio local `.m2`. * * @param groupId groupId do parent * @param artifactId artifactId do parent * @param version version do parent * @return conteudo do pom ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String carregarParentPomDoM2(String groupId, String artifactId, String version) {
         String userHome = System.getProperty("user.home");
         File m2Repo = new File(userHome, ".m2/repository");
@@ -289,14 +317,24 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
         }
     }
 
-    private String detectarBuildTool(File raizSeguraProjeto) {
-        if (raizSeguraProjeto == null) return "desconhecido";
-        if (new File(raizSeguraProjeto, "pom.xml").exists()) return "maven";
-        if (new File(raizSeguraProjeto, "build.gradle").exists()) return "gradle";
-        if (new File(raizSeguraProjeto, "build.gradle.kts").exists()) return "gradle";
+    /** * Detecta a ferramenta de build mais provavel. * * @param raizSeguraProjeto raiz segura * @param moduloPreferencial modulo preferencial * @return nome da ferramenta de build * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String detectarBuildTool(File raizSeguraProjeto, File moduloPreferencial) {
+        if (moduloPreferencial != null) {
+            if (new File(moduloPreferencial, "pom.xml").exists()) return "maven";
+            if (new File(moduloPreferencial, "build.gradle").exists()) return "gradle";
+            if (new File(moduloPreferencial, "build.gradle.kts").exists()) return "gradle";
+        }
+
+        if (raizSeguraProjeto != null) {
+            if (new File(raizSeguraProjeto, "pom.xml").exists()) return "maven";
+            if (new File(raizSeguraProjeto, "build.gradle").exists()) return "gradle";
+            if (new File(raizSeguraProjeto, "build.gradle.kts").exists()) return "gradle";
+        }
+
         return "desconhecido";
     }
 
+    /** * Detecta branch atual a partir da raiz segura. * * @param raizSeguraProjeto raiz segura * @return branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String detectarBranchAtual(File raizSeguraProjeto) {
         if (raizSeguraProjeto == null) return "";
         File gitHead = new File(raizSeguraProjeto, ".git/HEAD");
@@ -310,23 +348,23 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
     }
 
     private String extrairGroupIdEfetivo(String conteudoPom) {
-        String groupIdProjeto = extrairPrimeiraTagNoEscopoProjeto(conteudoPom, "groupId");
+        String groupIdProjeto = support.extrairPrimeiraTagNoEscopoProjeto(conteudoPom, "groupId");
         if (groupIdProjeto != null && groupIdProjeto.length() > 0) return groupIdProjeto;
-        return extrairPrimeiraTag(conteudoPom, "groupId");
+        return support.extrairPrimeiraTag(conteudoPom, "groupId");
     }
 
     private String extrairVersionEfetiva(String conteudoPom) {
-        String versionProjeto = extrairPrimeiraTagNoEscopoProjeto(conteudoPom, "version");
+        String versionProjeto = support.extrairPrimeiraTagNoEscopoProjeto(conteudoPom, "version");
         if (versionProjeto != null && versionProjeto.length() > 0) return versionProjeto;
-        return extrairPrimeiraTag(conteudoPom, "version");
+        return support.extrairPrimeiraTag(conteudoPom, "version");
     }
 
     private String extrairJavaVersion(String conteudoPom) {
-        String valor = extrairValorPropriedade(conteudoPom, "maven.compiler.source");
+        String valor = support.extrairValorPropriedade(conteudoPom, "maven.compiler.source");
         if (valor != null && valor.length() > 0) return valor;
-        valor = extrairValorPropriedade(conteudoPom, "java.version");
+        valor = support.extrairValorPropriedade(conteudoPom, "java.version");
         if (valor != null && valor.length() > 0) return valor;
-        valor = extrairValorPropriedade(conteudoPom, "maven.compiler.target");
+        valor = support.extrairValorPropriedade(conteudoPom, "maven.compiler.target");
         if (valor != null && valor.length() > 0) return valor;
         return "1.7";
     }
@@ -334,7 +372,12 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
     private List<String> extrairDependenciasDeclaradas(String conteudoPom) {
         List<String> dependencias = new ArrayList<String>();
         if (conteudoPom == null || conteudoPom.trim().length() == 0) return dependencias;
-        Pattern dependencyPattern = Pattern.compile("<dependency>\\s*.*?<groupId>\\s*([^<]+?)\\s*</groupId>\\s*.*?<artifactId>\\s*([^<]+?)\\s*</artifactId>\\s*(?:.*?<version>\\s*([^<]+?)\\s*</version>)?\\s*.*?</dependency>", Pattern.DOTALL);
+
+        Pattern dependencyPattern = Pattern.compile(
+                "<dependency>\\s*.*?<groupId>\\s*([^<]+?)\\s*</groupId>\\s*.*?<artifactId>\\s*([^<]+?)\\s*</artifactId>\\s*(?:.*?<version>\\s*([^<]+?)\\s*</version>)?\\s*.*?</dependency>",
+                Pattern.DOTALL
+        );
+
         Matcher matcher = dependencyPattern.matcher(conteudoPom);
         while (matcher.find()) {
             String groupId = valorSeguro(matcher.group(1));
@@ -343,6 +386,7 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
             if (matcher.groupCount() >= 3 && matcher.group(3) != null) {
                 version = matcher.group(3).trim();
             }
+
             StringBuilder linha = new StringBuilder();
             linha.append(groupId).append(":").append(artifactId);
             if (version.length() > 0) {
@@ -350,6 +394,7 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
             }
             dependencias.add(linha.toString());
         }
+
         return dependencias;
     }
 
@@ -375,52 +420,18 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
         }
     }
 
-    private String extrairPrimeiraTag(String conteudo, String tag) {
-        if (conteudo == null || tag == null || tag.trim().length() == 0) return "";
-        Pattern pattern = Pattern.compile("<" + tag + ">\\s*([^<]+?)\\s*</" + tag + ">");
-        Matcher matcher = pattern.matcher(conteudo);
-        if (matcher.find()) return matcher.group(1).trim();
-        return "";
-    }
-
-    private String extrairPrimeiraTagNoEscopoParent(String conteudo, String tag) {
-        if (conteudo == null || tag == null || tag.trim().length() == 0) return "";
-        Pattern parentPattern = Pattern.compile("<parent>([\\s\\S]*?)</parent>", Pattern.DOTALL);
-        Matcher parentMatcher = parentPattern.matcher(conteudo);
-        if (parentMatcher.find()) {
-            String blocoParent = parentMatcher.group(1);
-            Pattern tagPattern = Pattern.compile("<" + tag + ">\\s*([^<]+?)\\s*</" + tag + ">");
-            Matcher tagMatcher = tagPattern.matcher(blocoParent);
-            if (tagMatcher.find()) return tagMatcher.group(1).trim();
+    private boolean mesmoOuRelacionado(File a, File b) {
+        if (a == null || b == null) {
+            return false;
         }
-        return "";
-    }
 
-    private String extrairPrimeiraTagNoEscopoProjeto(String conteudo, String tag) {
-        if (conteudo == null || tag == null || tag.trim().length() == 0) return "";
-        Pattern projectPattern = Pattern.compile("<project[\\s\\S]*?</project>", Pattern.DOTALL);
-        Matcher projectMatcher = projectPattern.matcher(conteudo);
-        if (!projectMatcher.find()) return "";
-        String blocoProjeto = projectMatcher.group(0);
-        Pattern parentPattern = Pattern.compile("<parent[\\s\\S]*?</parent>", Pattern.DOTALL);
-        blocoProjeto = parentPattern.matcher(blocoProjeto).replaceFirst("");
-        Pattern tagPattern = Pattern.compile("<" + tag + ">\\s*([^<]+?)\\s*</" + tag + ">");
-        Matcher tagMatcher = tagPattern.matcher(blocoProjeto);
-        if (tagMatcher.find()) return tagMatcher.group(1).trim();
-        return "";
-    }
-
-    private String extrairValorPropriedade(String conteudo, String nomePropriedade) {
-        if (conteudo == null || nomePropriedade == null || nomePropriedade.trim().length() == 0) return "";
-        Pattern pattern = Pattern.compile("<" + Pattern.quote(nomePropriedade) + ">\\s*([^<]+?)\\s*</" + Pattern.quote(nomePropriedade) + ">");
-        Matcher matcher = pattern.matcher(conteudo);
-        if (matcher.find()) return matcher.group(1).trim();
-        return "";
-    }
-
-    private String streetPath(String path) {
-        if (path == null) return "";
-        return path.replace("\\\\", "/").replace("\\", "/");
+        try {
+            String ca = a.getCanonicalPath();
+            String cb = b.getCanonicalPath();
+            return ca.startsWith(cb) || cb.startsWith(ca);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String descreverArquivo(File arquivo) {
@@ -432,8 +443,23 @@ public class ProjectDependencyInspectionTool implements AgentTool, AgentToolProm
         }
     }
 
+    private String streetPath(String path) {
+        if (path == null) return "";
+        return path.replace("\\\\", "/").replace("\\", "/");
+    }
+
     private String valorSeguro(String valor) {
         if (valor == null) return "";
         return valor.trim();
     }
+    /** * Extrai a primeira ocorrencia simples de uma tag XML textual. * * @param conteudo conteudo XML * @param tag nome da tag * @return valor encontrado ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String extrairPrimeiraTag(String conteudo, String tag) {
+        return support.extrairPrimeiraTag(conteudo, tag);
+    }
+
+    /** * Extrai a primeira ocorrencia de uma tag dentro do escopo do bloco parent. * * @param conteudo conteudo XML * @param tag nome da tag * @return valor encontrado ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String extrairPrimeiraTagNoEscopoParent(String conteudo, String tag) {
+        return support.extrairPrimeiraTagNoEscopoParent(conteudo, tag);
+    }
+    
 }

@@ -1,5 +1,10 @@
 package com.mcp.sailibrary.plugin.agent.context;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.ResourcesPlugin;
 import org.eclipse.jdt.core.ICompilationUnit;
@@ -10,27 +15,17 @@ import org.eclipse.jdt.core.IPackageFragmentRoot;
 import org.eclipse.jdt.core.IType;
 import org.eclipse.jdt.core.JavaCore;
 
-import com.mcp.sailibrary.plugin.agent.context.ContextOrchestrator;
-
-/**  * dependencies: * - org.eclipse.core.resources * - org.eclipse.jdt.core * - com.mcp.sailibrary.plugin.agent.context.ContextOrchestrator * purpose: "Resolver classe e metodo por nome no workspace e acionar o motor de contexto baseado em unit e offset." * design_pattern: "Adapter / Resolver" * --- */
+/** * Resolve classe e metodo por nome no workspace e aciona o motor de contexto * baseado em compilation unit e offset. * * <p>Esta implementacao foi reforcada para reduzir ambiguidades em workspaces * com varios projetos e em cenarios Maven multimodulo, priorizando resolucao * por FQCN e apenas depois usando fallback por nome simples.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class JdtContextByNameResolver {
 
     private ContextOrchestrator contextOrchestrator;
 
-    /**
- * Inicializa o resolver que converte nomes em coordenadas JDT.
- *
- * @author Renato Tomaz Nati
- */
+    /** * Inicializa o resolver que converte nomes em coordenadas JDT. * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public JdtContextByNameResolver() {
         this.contextOrchestrator = new ContextOrchestrator();
     }
 
-    /**
- * Resolve classe e metodo por nome e dispara o enraizamento pelo motor principal.
- *
- * @author Renato Tomaz Nati
- */
+    /** * Resolve classe e metodo por nome e dispara o enraizamento pelo motor * principal. * * @param nomeClasse nome simples ou FQCN da classe * @param nomeMetodo nome do metodo * @param profundidadeMaxima profundidade maxima do rastreamento * @return breadcrumb estrutural produzido pelo orquestrador * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public String enraizarChamadasPorNome(String nomeClasse, String nomeMetodo, int profundidadeMaxima) {
         if (nomeClasse == null || nomeClasse.trim().length() == 0) {
             return "Erro Operacional: O parametro 'classe' e obrigatorio.";
@@ -71,42 +66,45 @@ public class JdtContextByNameResolver {
         }
     }
 
-    /**
- * Procura a classe primeiro por FQCN e depois por nome simples em todos os projetos Java abertos.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-18
- */
+    /** * Procura a classe primeiro por FQCN e depois, se necessario, por nome * simples com criterio deterministico. * * @param nomeClasse nome simples ou FQCN * @return tipo resolvido ou null * * @throws Exception quando houver falha grave de leitura JDT * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private IType localizarTipoNoWorkspace(String nomeClasse) throws Exception {
         IProject[] projetos = ResourcesPlugin.getWorkspace().getRoot().getProjects();
 
-        for (int indiceProjeto = 0; indiceProjeto < projetos.length; indiceProjeto++) {
-            IProject projetoAtual = projetos[indiceProjeto];
+        List<IJavaProject> projetosJava = new ArrayList<IJavaProject>();
+        for (int i = 0; i < projetos.length; i++) {
+            IProject projetoAtual = projetos[i];
             if (!projetoAtual.isOpen() || !projetoAtual.hasNature(JavaCore.NATURE_ID)) {
                 continue;
             }
+            projetosJava.add(JavaCore.create(projetoAtual));
+        }
 
-            IJavaProject javaProject = JavaCore.create(projetoAtual);
+        ordenarProjetosJavaDeterministicamente(projetosJava);
 
-            IType tipoPorNomeCanonico = javaProject.findType(nomeClasse);
+        for (int i = 0; i < projetosJava.size(); i++) {
+            IType tipoPorNomeCanonico = projetosJava.get(i).findType(nomeClasse);
             if (tipoPorNomeCanonico != null && tipoPorNomeCanonico.exists()) {
                 return tipoPorNomeCanonico;
             }
+        }
 
-            IType tipoPorNomeSimples = localizarTipoPorNomeSimples(javaProject, nomeClasse);
+        List<IType> candidatos = new ArrayList<IType>();
+        for (int i = 0; i < projetosJava.size(); i++) {
+            IType tipoPorNomeSimples = localizarTipoPorNomeSimples(projetosJava.get(i), nomeClasse);
             if (tipoPorNomeSimples != null && tipoPorNomeSimples.exists()) {
-                return tipoPorNomeSimples;
+                candidatos.add(tipoPorNomeSimples);
             }
         }
 
-        return null;
+        if (candidatos.isEmpty()) {
+            return null;
+        }
+
+        ordenarTiposDeterministicamente(candidatos);
+        return candidatos.get(0);
     }
 
-    /**
- * Faz fallback por nome simples percorrendo pacotes fonte do projeto.
- *
- * @author Renato Tomaz Nati
- */
+    /** * Faz fallback por nome simples percorrendo pacotes fonte do projeto. * * @param javaProject projeto Java de busca * @param nomeClasse nome simples da classe * @return tipo encontrado ou null * * @throws Exception quando houver falha grave de leitura JDT * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private IType localizarTipoPorNomeSimples(IJavaProject javaProject, String nomeClasse) throws Exception {
         IPackageFragment[] pacotes = javaProject.getPackageFragments();
 
@@ -133,11 +131,7 @@ public class JdtContextByNameResolver {
         return null;
     }
 
-    /**
- * Localiza o metodo pelo nome dentro do tipo encontrado.
- *
- * @author Renato Tomaz Nati
- */
+    /** * Localiza o metodo pelo nome dentro do tipo encontrado. * * @param tipo tipo alvo * @param nomeMetodo nome do metodo * @return metodo encontrado ou null * * @throws Exception quando houver falha grave de leitura JDT * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private IMethod localizarMetodoNoTipo(IType tipo, String nomeMetodo) throws Exception {
         IMethod[] metodos = tipo.getMethods();
 
@@ -149,5 +143,43 @@ public class JdtContextByNameResolver {
         }
 
         return null;
+    }
+
+    /** * Ordena projetos Java de forma deterministica para reduzir resultados * aleatorios em cenarios ambíguos. * * @param projetos lista de projetos Java * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private void ordenarProjetosJavaDeterministicamente(List<IJavaProject> projetos) {
+        Collections.sort(projetos, new Comparator<IJavaProject>() {
+            @Override
+            public int compare(IJavaProject a, IJavaProject b) {
+                String na = "";
+                String nb = "";
+
+                try {
+                    na = a != null && a.getProject() != null ? a.getProject().getName() : "";
+                    nb = b != null && b.getProject() != null ? b.getProject().getName() : "";
+                } catch (Exception e) {
+                }
+
+                return na.compareToIgnoreCase(nb);
+            }
+        });
+    }
+
+    /** * Ordena tipos de forma deterministica para reduzir não determinismo em * fallback por nome simples. * * @param tipos lista de tipos candidatos * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private void ordenarTiposDeterministicamente(List<IType> tipos) {
+        Collections.sort(tipos, new Comparator<IType>() {
+            @Override
+            public int compare(IType a, IType b) {
+                String qa = "";
+                String qb = "";
+
+                try {
+                    qa = a != null ? a.getFullyQualifiedName() : "";
+                    qb = b != null ? b.getFullyQualifiedName() : "";
+                } catch (Exception e) {
+                }
+
+                return qa.compareToIgnoreCase(qb);
+            }
+        });
     }
 }

@@ -38,88 +38,76 @@
       </key>
    </extension>
 
-  <extension point="org.eclipse.ui.menus">
-   <menuContribution locationURI="menu:org.eclipse.ui.main.menu?after=additions">
-      <menu id="com.mcp.sailibrary.plugin.menus.sampleMenu" label="SAI App" mnemonic="M">
-         <command commandId="com.mcp.sailibrary.plugin.commands.sampleCommand" id="com.mcp.sailibrary.plugin.menus.sampleCommand" mnemonic="S">
-         </command>
-      </menu>
-   </menuContribution>
+   <extension point="org.eclipse.ui.menus">
+      <menuContribution locationURI="menu:org.eclipse.ui.main.menu?after=additions">
+         <menu id="com.mcp.sailibrary.plugin.menus.sampleMenu" label="SAI App" mnemonic="M">
+            <command commandId="com.mcp.sailibrary.plugin.commands.sampleCommand" id="com.mcp.sailibrary.plugin.menus.sampleCommand" mnemonic="S">
+            </command>
+         </menu>
+      </menuContribution>
 
-   <menuContribution locationURI="toolbar:org.eclipse.ui.main.toolbar?after=additions">
-      <toolbar id="com.mcp.sailibrary.plugin.toolbars.sampleToolbar">
-         <command id="com.mcp.sailibrary.plugin.toolbars.sampleCommand" commandId="com.mcp.sailibrary.plugin.commands.sampleCommand" icon="icons/sailibrary.png" tooltip="Acionar Chat IA (Pair Programming)">
-         </command>
-      </toolbar>
-   </menuContribution>
+      <menuContribution locationURI="toolbar:org.eclipse.ui.main.toolbar?after=additions">
+         <toolbar id="com.mcp.sailibrary.plugin.toolbars.sampleToolbar">
+            <command id="com.mcp.sailibrary.plugin.toolbars.sampleCommand" commandId="com.mcp.sailibrary.plugin.commands.sampleCommand" icon="icons/sailibrary.png" tooltip="Acionar Chat IA (Pair Programming)">
+            </command>
+         </toolbar>
+      </menuContribution>
 
-   <menuContribution locationURI="popup:org.eclipse.ui.navigator.ProjectExplorer#PopupMenu?after=additions">
-      <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.projectExplorer" label="SAI App">
-         <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
-         </command>
-      </menu>
-   </menuContribution>
+      <menuContribution locationURI="popup:org.eclipse.ui.navigator.ProjectExplorer#PopupMenu?after=additions">
+         <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.projectExplorer" label="SAI App">
+            <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
+            </command>
+         </menu>
+      </menuContribution>
 
-   <menuContribution locationURI="popup:org.eclipse.jdt.ui.PackageExplorer?after=additions">
-      <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.packageExplorer" label="SAI App">
-         <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
-         </command>
-      </menu>
-   </menuContribution>
+      <menuContribution locationURI="popup:org.eclipse.jdt.ui.PackageExplorer?after=additions">
+         <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.packageExplorer" label="SAI App">
+            <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
+            </command>
+         </menu>
+      </menuContribution>
 
-   <menuContribution locationURI="popup:org.eclipse.jdt.ui.PackageExplorer#PopupMenu?after=additions">
-      <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.packageExplorerPopup" label="SAI App">
-         <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
-         </command>
-      </menu>
-   </menuContribution>
+      <menuContribution locationURI="popup:org.eclipse.jdt.ui.PackageExplorer#PopupMenu?after=additions">
+         <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.packageExplorerPopup" label="SAI App">
+            <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
+            </command>
+         </menu>
+      </menuContribution>
 
-   <menuContribution locationURI="popup:#TextEditorContext?after=additions">
-      <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.textEditor" label="SAI App">
-         <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
-         </command>
-      </menu>
-   </menuContribution>
+      <menuContribution locationURI="popup:#TextEditorContext?after=additions">
+         <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.textEditor" label="SAI App">
+            <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
+            </command>
+         </menu>
+      </menuContribution>
 
-   <menuContribution locationURI="popup:#CompilationUnitEditorContext?after=additions">
-      <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.compilationUnitEditor" label="SAI App">
-         <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
-         </command>
-         <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
-         </command>
-      </menu>
-   </menuContribution>
-</extension>
-
-<extension point="org.eclipse.ui.decorators">
-   <decorator adaptable="false" class="com.mcp.sailibrary.plugin.chat.context.decorators.NamedStructuralContextDecorator" id="com.mcp.sailibrary.plugin.chat.context.decorators.NamedStructuralContextDecorator" label="SAI Structural Context Decorator" lightweight="true" state="true">
-      <enablement>
-         <or>
-            <objectClass name="org.eclipse.core.resources.IResource"/>
-            <objectClass name="org.eclipse.jdt.core.IPackageFragment"/>
-            <objectClass name="org.eclipse.jdt.core.ICompilationUnit"/>
-         </or>
-      </enablement>
-   </decorator>
-</extension>
+      <menuContribution locationURI="popup:#CompilationUnitEditorContext?after=additions">
+         <menu id="com.mcp.sailibrary.plugin.popup.contextMenu.compilationUnitEditor" label="SAI App">
+            <command commandId="com.mcp.sailibrary.plugin.commands.addPrimaryContextCommand" label="Adicionar como Principal" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addEditableContextCommand" label="Adicionar como Editavel" style="push">
+            </command>
+            <command commandId="com.mcp.sailibrary.plugin.commands.addReferenceContextCommand" label="Adicionar como Referencial" style="push">
+            </command>
+         </menu>
+      </menuContribution>
+   </extension>
 
    <extension point="org.eclipse.ui.views">
       <category id="com.mcp.sailibrary.category" name="SaiApp">
@@ -130,7 +118,7 @@
    </extension>
 
    <extension point="org.eclipse.ui.decorators">
-      <decorator adaptable="true" class="com.mcp.sailibrary.plugin.chat.context.decorators.NamedStructuralContextDecorator" id="com.mcp.sailibrary.plugin.chat.context.decorators.NamedStructuralContextDecorator" label="SAI Structural Context Decorator" lightweight="true" state="true">
+      <decorator adaptable="false" class="com.mcp.sailibrary.plugin.chat.context.decorators.NamedStructuralContextDecorator" id="com.mcp.sailibrary.plugin.chat.context.decorators.NamedStructuralContextDecorator" label="SAI Structural Context Decorator" lightweight="true" state="true">
          <enablement>
             <or>
                <objectClass name="org.eclipse.core.resources.IResource"/>

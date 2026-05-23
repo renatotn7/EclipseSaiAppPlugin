@@ -107,7 +107,8 @@ public class InspectWorkspaceMutationStateTool implements AgentTool, AgentToolPr
 
             int totalBatches = 0;
             try {
-                List<com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationBatch> batches = mutationStore.listarBatches();
+                List<com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationBatch> batches =
+                        mutationStore.listarBatches();
                 totalBatches = batches != null ? batches.size() : 0;
             } catch (Exception e) {
                 totalBatches = 0;
@@ -203,7 +204,7 @@ public class InspectWorkspaceMutationStateTool implements AgentTool, AgentToolPr
         return normalized;
     }
 
-    /** * Detecta a branch atual do projeto a partir do arquivo .git/HEAD, quando * disponivel. * * @param projectRoot raiz fisica do projeto * @return nome da branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Detecta a branch atual do projeto a partir do arquivo `.git/HEAD`, quando * disponivel. * * @param projectRoot raiz fisica do projeto * @return nome da branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String detectarBranchAtual(File projectRoot) {
         if (projectRoot == null) {
             return "";

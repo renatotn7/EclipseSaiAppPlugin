@@ -91,7 +91,14 @@ public class NamedBlocksController {
     public void adicionarComoReferencia(ISelection selection) {
         adicionarSelecaoEstruturalComoContexto(NamedContextTargetRole.REFERENCE, selection);
     }
+    /** * Solicita a insercao de um alias de contexto na conversa. * * @param name nome do bloco ou contexto estrutural * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    public void inserirAliasNaConversa(String name) {
+        if (view == null || isBlank(name)) {
+            return;
+        }
 
+        view.inserirAliasNaConversa("@" + name);
+    }
     /* * Feature * Data: 2026-05-20 00:00:00 * Caller: adicionarSelecaoComoPrincipal, adicionarSelecaoComoEditavel, adicionarSelecaoComoReferencia * Callee: NamedBlockSessionService.addBlock, NamedBlockDocumentBindingService.bindBlocksToDocument * Objetivo: Criar e registrar um bloco textual a partir da selecao atual do editor. */
     private void adicionarSelecaoTextual(NamedBlockKind kind) {
         try {

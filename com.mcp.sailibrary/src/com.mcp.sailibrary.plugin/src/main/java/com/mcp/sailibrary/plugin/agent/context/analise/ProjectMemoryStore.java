@@ -8,40 +8,33 @@ import java.security.MessageDigest;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
-/** * --- * yaml_header: * version: "1.0" * dependencies: * - java.io.File * - java.security.MessageDigest * - com.google.gson * purpose: "Gerenciar a memoria persistente por projeto em diretorio local do usuario, com contexto de branch e dados estruturais reutilizaveis." * design_pattern: "Facade / Repository" * --- */
+/** * Gerencia a memoria persistente por projeto em diretorio local do usuario, * com contexto de branch e dados estruturais reutilizaveis. * * <p>Esta implementacao foi reforcada para reduzir fragmentacao de memoria em * projetos Maven multimodulo e em workspaces com mais de um `.project`. A * chave do projeto e a raiz semantica da memoria agora sao baseadas em um * diretorio de identidade mais estavel, priorizando: * <ul> * <li>o `.project` mais proximo</li> * <li>ou o `pom.xml` mais proximo</li> * <li>ou, em ultimo caso, o diretorio originalmente informado</li> * </ul> * </p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class ProjectMemoryStore {
 
     private File projectRootDirectory;
     private ProjectMemoryPaths memoryPaths;
     private ProjectMemoryJsonSupport jsonSupport;
 
-    /**
- * Inicializa a estrutura de memoria persistente para o projeto informado.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Inicializa a estrutura de memoria persistente para o projeto informado. * * @param projectRootDirectory raiz original informada * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public ProjectMemoryStore(File projectRootDirectory) {
-        this.projectRootDirectory = projectRootDirectory;
+        this.projectRootDirectory = resolverDiretorioIdentidade(projectRootDirectory);
         this.jsonSupport = new ProjectMemoryJsonSupport();
-        this.memoryPaths = new ProjectMemoryPaths(gerarProjectKey(projectRootDirectory));
+        this.memoryPaths = new ProjectMemoryPaths(gerarProjectKey(this.projectRootDirectory));
     }
+
+    /** * Registra uma memoria basica do projeto com raiz segura e metadados * minimos. * * @param safeRoot raiz segura percebida * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public void registrarProjectMemoryBasica(String safeRoot) {
         JsonObject root = jsonSupport.lerJson(memoryPaths.getProjectMemoryFile());
 
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
-        root.addProperty("projectRoot", projectRootDirectory != null ? projectRootDirectory.getAbsolutePath() : "");
+        root.addProperty("projectRoot", normalizarCaminho(projectRootDirectory));
         root.addProperty("safeRoot", valorSeguro(safeRoot));
         root.addProperty("lastUpdatedAt", String.valueOf(System.currentTimeMillis()));
 
         jsonSupport.gravarJson(memoryPaths.getProjectMemoryFile(), root);
     }
-    /**
- * Retorna um resumo curto da memoria persistente para enriquecer a instrucao da IA.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-18
- */
+
+    /** * Retorna um resumo curto da memoria persistente para enriquecer a * instrucao da IA. * * @return resumo textual da memoria do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public String consultarResumoMemoria() {
         JsonObject projectMemory = jsonSupport.lerJson(memoryPaths.getProjectMemoryFile());
         JsonObject branchContext = jsonSupport.lerJson(memoryPaths.getBranchContextFile());
@@ -80,15 +73,14 @@ public class ProjectMemoryStore {
         if (discoveredPatterns.has("patterns")) {
             resumo.append("patterns: ").append(discoveredPatterns.get("patterns").toString()).append("\n");
         }
+        if (discoveredPatterns.has("patternsAparentes")) {
+            resumo.append("patternsAparentes: ").append(discoveredPatterns.get("patternsAparentes").toString()).append("\n");
+        }
 
         return resumo.toString();
     }
-    /**
- * Garante que os arquivos basicos existam em disco com estrutura inicial.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+
+    /** * Garante que os arquivos basicos existam em disco com estrutura inicial. * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public void inicializarEstrutura() {
         criarSeAusente(memoryPaths.getProjectMemoryFile(), criarProjectMemoryInicial());
         criarSeAusente(memoryPaths.getToolHistoryFile(), criarToolHistoryInicial());
@@ -97,12 +89,7 @@ public class ProjectMemoryStore {
         criarSeAusente(memoryPaths.getBranchContextFile(), criarBranchContextInicial());
     }
 
-    /**
- * Atualiza o contexto da branch atual percebida no projeto.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Atualiza o contexto da branch atual percebida no projeto. * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public void atualizarBranchContexto() {
         JsonObject branchContext = jsonSupport.lerJson(memoryPaths.getBranchContextFile());
         String branchAtual = detectarBranchAtual();
@@ -113,7 +100,7 @@ public class ProjectMemoryStore {
         }
 
         branchContext.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
-        branchContext.addProperty("projectRoot", projectRootDirectory != null ? projectRootDirectory.getAbsolutePath() : "");
+        branchContext.addProperty("projectRoot", normalizarCaminho(projectRootDirectory));
         branchContext.addProperty("lastSeenAt", String.valueOf(System.currentTimeMillis()));
         branchContext.addProperty("currentBranch", branchAtual);
 
@@ -127,19 +114,12 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getBranchContextFile(), branchContext);
     }
 
- 
-
-    /**
- * Registra informacoes estruturais mais estaveis do projeto.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Registra informacoes estruturais mais estaveis do projeto. * * @param safeRoot raiz segura percebida * @param buildTool ferramenta de build * @param javaVersion versao Java percebida * @param groupId groupId percebido * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public void registrarProjectMemory(String safeRoot, String buildTool, String javaVersion, String groupId) {
         JsonObject root = jsonSupport.lerJson(memoryPaths.getProjectMemoryFile());
 
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
-        root.addProperty("projectRoot", projectRootDirectory != null ? projectRootDirectory.getAbsolutePath() : "");
+        root.addProperty("projectRoot", normalizarCaminho(projectRootDirectory));
         root.addProperty("safeRoot", valorSeguro(safeRoot));
         root.addProperty("buildTool", valorSeguro(buildTool));
         root.addProperty("javaVersion", valorSeguro(javaVersion));
@@ -149,17 +129,12 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getProjectMemoryFile(), root);
     }
 
-    /**
- * Registra um snapshot de dependencias e frameworks percebidos.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Registra um snapshot de dependencias e frameworks percebidos. * * @param dependencies dependencias detectadas * @param frameworks frameworks detectados * @param modules modulos detectados * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public void registrarDependencySnapshot(JsonArray dependencies, JsonArray frameworks, JsonArray modules) {
         JsonObject root = jsonSupport.lerJson(memoryPaths.getDependencySnapshotFile());
 
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
-        root.addProperty("projectRoot", projectRootDirectory != null ? projectRootDirectory.getAbsolutePath() : "");
+        root.addProperty("projectRoot", normalizarCaminho(projectRootDirectory));
         root.addProperty("lastUpdatedAt", String.valueOf(System.currentTimeMillis()));
 
         if (dependencies != null) {
@@ -177,12 +152,7 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getDependencySnapshotFile(), root);
     }
 
-    /**
- * Registra historico compacto da ultima execucao de ferramenta.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Registra historico compacto da ultima execucao de ferramenta. * * @param toolName nome da ferramenta * @param parametersSummary resumo dos parametros * @param resultSummary resumo do resultado * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public void registrarToolHistory(String toolName, String parametersSummary, String resultSummary) {
         JsonObject root = jsonSupport.lerJson(memoryPaths.getToolHistoryFile());
         JsonArray history;
@@ -209,10 +179,46 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getToolHistoryFile(), root);
     }
 
+    /** * Registra ou atualiza um pattern estrutural na memoria persistente. * * @param kind categoria do pattern * @param key chave do pattern * @param value valor do pattern * @param evidence evidencia resumida * @param confidence nivel de confianca * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    public void registrarPattern(String kind, String key, String value, String evidence, String confidence) {
+        if (key == null || key.trim().length() == 0) {
+            return;
+        }
+
+        JsonObject root = jsonSupport.lerJson(memoryPaths.getDiscoveredPatternsFile());
+
+        if (!root.has("patterns") || !root.get("patterns").isJsonArray()) {
+            root.add("patterns", new JsonArray());
+        }
+        if (!root.has("patternsAparentes") || !root.get("patternsAparentes").isJsonArray()) {
+            root.add("patternsAparentes", new JsonArray());
+        }
+
+        JsonArray patternsEfetivos = root.getAsJsonArray("patterns");
+        JsonArray patternsAparentes = root.getAsJsonArray("patternsAparentes");
+
+        if ("alta".equalsIgnoreCase(confidence) || "confirmado".equalsIgnoreCase(confidence)) {
+            removerPadraoDaLista(patternsAparentes, key);
+            atualizarOuInserirPadrao(patternsEfetivos, kind, key, value, evidence, confidence);
+        } else {
+            removerPadraoDaLista(patternsEfetivos, key);
+            atualizarOuInserirPadrao(patternsAparentes, kind, key, value, evidence, confidence);
+        }
+
+        jsonSupport.gravarJson(memoryPaths.getDiscoveredPatternsFile(), root);
+    }
+
+    /** * Retorna o resolver de caminhos da memoria persistente. * * @return paths da memoria persistente * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public ProjectMemoryPaths getMemoryPaths() {
         return memoryPaths;
     }
 
+    /** * Retorna o diretorio de identidade efetivo usado por esta memoria. * * @return diretorio identidade do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    public File getProjectRootDirectory() {
+        return projectRootDirectory;
+    }
+
+    /** * Garante a criacao inicial de um arquivo JSON quando ele ainda nao existir. * * @param arquivo arquivo alvo * @param conteudoInicial conteudo inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private void criarSeAusente(File arquivo, JsonObject conteudoInicial) {
         if (arquivo == null) {
             return;
@@ -223,10 +229,11 @@ public class ProjectMemoryStore {
         }
     }
 
+    /** * Cria o JSON inicial de memoria estrutural do projeto. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private JsonObject criarProjectMemoryInicial() {
         JsonObject root = new JsonObject();
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
-        root.addProperty("projectRoot", projectRootDirectory != null ? projectRootDirectory.getAbsolutePath() : "");
+        root.addProperty("projectRoot", normalizarCaminho(projectRootDirectory));
         root.addProperty("safeRoot", "");
         root.addProperty("buildTool", "");
         root.addProperty("javaVersion", "");
@@ -238,6 +245,7 @@ public class ProjectMemoryStore {
         return root;
     }
 
+    /** * Cria o JSON inicial de historico de ferramentas. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private JsonObject criarToolHistoryInicial() {
         JsonObject root = new JsonObject();
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
@@ -245,6 +253,7 @@ public class ProjectMemoryStore {
         return root;
     }
 
+    /** * Cria o JSON inicial de snapshot de dependencias. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private JsonObject criarDependencySnapshotInicial() {
         JsonObject root = new JsonObject();
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
@@ -255,68 +264,33 @@ public class ProjectMemoryStore {
         return root;
     }
 
-    /**
-     * ---
-     * yaml_header:
-     * version: "1.2"
-     * dependencies:
-     * - java.io.File
-     * - java.io.BufferedReader
-     * - java.io.FileReader
-     * - java.security.MessageDigest
-     * - com.google.gson.JsonObject
-     * - com.google.gson.JsonArray
-     * purpose: "Gerenciar a memoria persistente por projeto adicionando suporte a segregacao tática entre padroes efetivos e padroes aparentes suspeitos com rastreabilidade de origem."
-     * design_pattern: "Repository / Facade"
-     * ---
-     */
-
-    // [METODO MODIFICADO]
-    // Data: 2026-05-16 20:30:00
-    // Caller: camada de controle do plugin ou ferramentas da IA
-    // Callee: ProjectMemoryJsonSupport.lerJson, ProjectMemoryJsonSupport.gravarJson
-    // Objetivo: Feature para registrar ou atualizar padroes estruturais, suportando a promocao de padroes aparentes para efetivos com mapeamento de caminhos comuns e evidencias.
-    public void registrarPattern(String kind, String key, String value, String evidence, String confidence) {
-        if (key == null || key.trim().length() == 0) {
-            return;
-        }
-
-        JsonObject root = jsonSupport.lerJson(memoryPaths.getDiscoveredPatternsFile());
-        
-        // Garante a existencia das duas matrizes de conhecimento tatico
-        if (!root.has("patterns") || !root.get("patterns").isJsonArray()) {
-            root.add("patterns", new JsonArray());
-        }
-        if (!root.has("patternsAparentes") || !root.get("patternsAparentes").isJsonArray()) {
-            root.add("patternsAparentes", new JsonArray());
-        }
-
-        JsonArray patternsEfetivos = root.getAsJsonArray("patterns");
-        JsonArray patternsAparentes = root.getAsJsonArray("patternsAparentes");
-
-        // Se a confianca for alta, removemos das suspeitas (se existia) e promovemos para efetivo
-     // Se a confianca for alta, removemos das suspeitas (se existia) e promovemos para efetivo
-        if ("alta".equalsIgnoreCase(confidence) || "confirmado".equalsIgnoreCase(confidence)) {
-            removerPadraoDaLista(patternsAparentes, key);
-            atualizarOuInserirPadrao(patternsEfetivos, kind, key, value, evidence, confidence);
-        } else {
-            // Feature: Exclusao mutua militar. Se a confianca for baixa/aparente, expurga da base de efetivos (caso tenha sido rebaixada) e mantem nas suspeitas.
-            removerPadraoDaLista(patternsEfetivos, key);
-            atualizarOuInserirPadrao(patternsAparentes, kind, key, value, evidence, confidence);
-        }
-
-        jsonSupport.gravarJson(memoryPaths.getDiscoveredPatternsFile(), root);
+    /** * Cria o JSON inicial de patterns descobertos. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private JsonObject criarDiscoveredPatternsInicial() {
+        JsonObject root = new JsonObject();
+        root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
+        root.add("patterns", new JsonArray());
+        root.add("patternsAparentes", new JsonArray());
+        return root;
     }
 
-    /**
- * Descrição não fornecida.
- *
- * @author Renato Tomaz Nati
- */
+    /** * Cria o JSON inicial de branch context. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private JsonObject criarBranchContextInicial() {
+        JsonObject root = new JsonObject();
+        root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
+        root.addProperty("projectRoot", normalizarCaminho(projectRootDirectory));
+        root.addProperty("currentBranch", "");
+        root.addProperty("previousBranch", "");
+        root.addProperty("reconfirmSensitiveHints", "false");
+        root.addProperty("lastSeenAt", "");
+        return root;
+    }
+
+    /** * Remove um pattern de uma lista JSON pelo valor da chave. * * @param lista lista JSON * @param chave chave do pattern * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private void removerPadraoDaLista(JsonArray lista, String chave) {
         if (lista == null || chave == null) {
             return;
         }
+
         for (int i = 0; i < lista.size(); i++) {
             JsonObject atual = lista.get(i).getAsJsonObject();
             if (atual.has("key") && chave.equals(atual.get("key").getAsString())) {
@@ -326,13 +300,10 @@ public class ProjectMemoryStore {
         }
     }
 
-    /**
- * Descrição não fornecida.
- *
- * @author Renato Tomaz Nati
- */
+    /** * Atualiza ou insere um pattern em uma lista JSON. * * @param lista lista alvo * @param kind categoria * @param key chave * @param value valor * @param evidence evidencia * @param confidence nivel de confianca * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private void atualizarOuInserirPadrao(JsonArray lista, String kind, String key, String value, String evidence, String confidence) {
         boolean atualizado = false;
+
         for (int i = 0; i < lista.size(); i++) {
             JsonObject atual = lista.get(i).getAsJsonObject();
             if (atual.has("key") && key.equals(atual.get("key").getAsString())) {
@@ -341,11 +312,11 @@ public class ProjectMemoryStore {
                 atual.addProperty("evidence", valorSeguro(evidence));
                 atual.addProperty("confidence", valorSeguro(confidence));
                 atual.addProperty("lastSeenAt", String.valueOf(System.currentTimeMillis()));
-                
-                // Calcula e insere caminhos relativos provaveis a partir da raiz se houver evidencia de arquivo
+
                 if (evidence != null && evidence.contains("/")) {
                     atual.addProperty("caminhoComumRaiz", valorSeguro(evidence));
                 }
+
                 atualizado = true;
                 break;
             }
@@ -359,74 +330,115 @@ public class ProjectMemoryStore {
             novo.addProperty("evidence", valorSeguro(evidence));
             novo.addProperty("confidence", valorSeguro(confidence));
             novo.addProperty("lastSeenAt", String.valueOf(System.currentTimeMillis()));
+
             if (evidence != null && evidence.contains("/")) {
                 novo.addProperty("caminhoComumRaiz", valorSeguro(evidence));
             }
+
             lista.add(novo);
         }
     }
 
-    // [METODO MODIFICADO]
-    // Data: 2026-05-16 20:40:00
-    // Caller: ProjectMemoryStore.inicializarEstrutura
-    // Callee: nenhum
-    // Objetivo: Atualizar o construtor do JSON inicial de padroes para incluir a estrutura de suspeitas.
-    private JsonObject criarDiscoveredPatternsInicial() {
-        JsonObject root = new JsonObject();
-        root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
-        root.add("patterns", new JsonArray());
-        root.add("patternsAparentes", new JsonArray()); // Matriz de suspeitas iniciais da IA
-        return root;
-    }
-
-    private JsonObject criarBranchContextInicial() {
-        JsonObject root = new JsonObject();
-        root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
-        root.addProperty("projectRoot", projectRootDirectory != null ? projectRootDirectory.getAbsolutePath() : "");
-        root.addProperty("currentBranch", "");
-        root.addProperty("previousBranch", "");
-        root.addProperty("reconfirmSensitiveHints", "false");
-        root.addProperty("lastSeenAt", "");
-        return root;
-    }
-
+    /** * Detecta a branch atual subindo a arvore a partir do diretorio identidade * ate encontrar um `.git/HEAD`. * * @return branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String detectarBranchAtual() {
         if (projectRootDirectory == null) {
             return "";
         }
 
-        File gitHead = new File(projectRootDirectory, ".git/HEAD");
-        if (!gitHead.exists()) {
-            return "";
-        }
-
-        BufferedReader bufferedReader = null;
-        try {
-            bufferedReader = new BufferedReader(new FileReader(gitHead));
-            String linha = bufferedReader.readLine();
-            if (linha == null) {
-                return "";
-            }
-
-            linha = linha.trim();
-            String prefixo = "ref: refs/heads/";
-            if (linha.startsWith(prefixo)) {
-                return linha.substring(prefixo.length());
-            }
-
-            return linha;
-        } catch (Exception e) {
-            return "";
-        } finally {
-            if (bufferedReader != null) {
+        File cursor = projectRootDirectory;
+        while (cursor != null && cursor.exists()) {
+            File gitHead = new File(cursor, ".git/HEAD");
+            if (gitHead.exists() && gitHead.isFile()) {
+                BufferedReader bufferedReader = null;
                 try {
-                    bufferedReader.close();
+                    bufferedReader = new BufferedReader(new FileReader(gitHead));
+                    String linha = bufferedReader.readLine();
+                    if (linha == null) {
+                        return "";
+                    }
+
+                    linha = linha.trim();
+                    String prefixo = "ref: refs/heads/";
+                    if (linha.startsWith(prefixo)) {
+                        return linha.substring(prefixo.length());
+                    }
+
+                    return linha;
                 } catch (Exception e) {
+                    return "";
+                } finally {
+                    if (bufferedReader != null) {
+                        try {
+                            bufferedReader.close();
+                        } catch (Exception e) {
+                        }
+                    }
                 }
             }
+
+            cursor = cursor.getParentFile();
         }
+
+        return "";
     }
 
+    /** * Resolve o diretorio de identidade do projeto, priorizando o `.project` * mais proximo e depois o `pom.xml` mais proximo. * * @param originalRoot raiz original recebida * @return diretorio identidade mais estavel para memoria persistente * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private File resolverDiretorioIdentidade(File originalRoot) {
+        if (originalRoot == null) {
+            return null;
+        }
+
+        File start = originalRoot;
+        if (start.isFile()) {
+            start = start.getParentFile();
+        }
+
+        File projectRootMaisProximo = localizarProjectRootMaisProximo(start);
+        if (projectRootMaisProximo != null) {
+            return projectRootMaisProximo;
+        }
+
+        File moduloMavenMaisProximo = localizarModuloMavenMaisProximo(start);
+        if (moduloMavenMaisProximo != null) {
+            return moduloMavenMaisProximo;
+        }
+
+        return originalRoot;
+    }
+
+    /** * Localiza o `.project` mais proximo subindo a arvore. * * @param start ponto inicial * @return diretorio contendo `.project` ou null * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private File localizarProjectRootMaisProximo(File start) {
+        File cursor = start;
+
+        while (cursor != null && cursor.exists()) {
+            File projectFile = new File(cursor, ".project");
+            if (projectFile.exists() && projectFile.isFile()) {
+                return cursor;
+            }
+
+            cursor = cursor.getParentFile();
+        }
+
+        return null;
+    }
+
+    /** * Localiza o modulo Maven mais proximo subindo a arvore. * * @param start ponto inicial * @return diretorio contendo `pom.xml` ou null * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private File localizarModuloMavenMaisProximo(File start) {
+        File cursor = start;
+
+        while (cursor != null && cursor.exists()) {
+            File pom = new File(cursor, "pom.xml");
+            if (pom.exists() && pom.isFile()) {
+                return cursor;
+            }
+
+            cursor = cursor.getParentFile();
+        }
+
+        return null;
+    }
+
+    /** * Gera a chave estavel do projeto a partir do diretorio identidade. * * @param rootDirectory diretorio identidade * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarProjectKey(File rootDirectory) {
         if (rootDirectory == null) {
             return "unknown_project";
@@ -442,6 +454,7 @@ public class ProjectMemoryStore {
         }
     }
 
+    /** * Gera hash curto deterministico. * * @param valor valor base * @return hash curto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarHashCurto(String valor) {
         try {
             MessageDigest messageDigest = MessageDigest.getInstance("MD5");
@@ -462,6 +475,7 @@ public class ProjectMemoryStore {
         }
     }
 
+    /** * Normaliza nome para uso em chave persistente. * * @param nome nome original * @return nome normalizado * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String normalizarNome(String nome) {
         if (nome == null || nome.trim().length() == 0) {
             return "project";
@@ -472,6 +486,20 @@ public class ProjectMemoryStore {
         return normalizado;
     }
 
+    /** * Converte arquivo em caminho normalizado. * * @param arquivo arquivo alvo * @return caminho normalizado * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String normalizarCaminho(File arquivo) {
+        if (arquivo == null) {
+            return "";
+        }
+
+        try {
+            return arquivo.getCanonicalPath().replace("\\", "/");
+        } catch (Exception e) {
+            return arquivo.getAbsolutePath().replace("\\", "/");
+        }
+    }
+
+    /** * Retorna valor seguro nao nulo. * * @param valor valor original * @return valor seguro * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String valorSeguro(String valor) {
         if (valor == null) {
             return "";

@@ -4,6 +4,7 @@ import java.io.File;
 
 import com.google.gson.JsonObject;
 import com.mcp.sailibrary.plugin.agent.AgentTool;
+import com.mcp.sailibrary.plugin.agent.context.ResolvedProjectScope;
 import com.mcp.sailibrary.plugin.agent.context.SourceInsightSupport;
 import com.mcp.sailibrary.plugin.agent.context.analise.ProjectMemoryJsonSupport;
 import com.mcp.sailibrary.plugin.agent.context.analise.ProjectMemoryPaths;
@@ -12,17 +13,13 @@ import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
 
+/** * Expor leitura da memoria persistente do projeto para a camada de agentes. * * <p>Esta ferramenta foi ajustada para resolver de forma mais estável o * diretório efetivo do projeto, reduzindo risco de fragmentação de memória em * cenários Maven multimódulo e múltiplos `.project`.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class ProjectMemoryQueryTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private File rootDirectory;
     private SourceInsightSupport support;
 
-    /**
- * Inicializa a ferramenta de leitura da memoria persistente do projeto.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Inicializa a ferramenta de leitura da memoria persistente do projeto. * * @param rootDirectory raiz segura do projeto atual * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public ProjectMemoryQueryTool(File rootDirectory) {
         this.rootDirectory = rootDirectory;
         this.support = new SourceInsightSupport();
@@ -32,6 +29,7 @@ public class ProjectMemoryQueryTool implements AgentTool, AgentToolPromptMetadat
     public String getName() {
         return "consultar_memoria_projeto";
     }
+
     @Override
     public AgentToolPromptMetadata getPromptMetadata() {
         AgentToolPromptMetadata metadata = new AgentToolPromptMetadata();
@@ -49,7 +47,7 @@ public class ProjectMemoryQueryTool implements AgentTool, AgentToolPromptMetadat
         AgentToolParameterMetadata path = new AgentToolParameterMetadata();
         path.setName("path");
         path.setRequired(false);
-        path.setDescription("Caminho relativo usado para resolver a raiz segura do projeto.");
+        path.setDescription("Caminho relativo usado para resolver o escopo efetivo do projeto.");
         path.setExampleValue("src/main/java");
         metadata.addParameter(path);
 
@@ -67,12 +65,8 @@ public class ProjectMemoryQueryTool implements AgentTool, AgentToolPromptMetadat
 
         return metadata;
     }
-    /**
- * Le um ou mais arquivos da memoria persistente do projeto.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+
+    /** * Le um ou mais arquivos da memoria persistente do projeto. * * @param jsonParameters parametros JSON da ferramenta * @return conteudo consultado ou resumo textual * * @author Renato Tomaz Nati * @since 2026-05-20 */
     @Override
     public String execute(String jsonParameters) {
         File projetoRaiz = resolverProjetoRaiz(jsonParameters);
@@ -114,24 +108,28 @@ public class ProjectMemoryQueryTool implements AgentTool, AgentToolPromptMetadat
         return montarResumoMemoria(memoryPaths, jsonSupport);
     }
 
-    /**
- * Resolve a raiz do projeto a partir do path informado ou da raiz conhecida.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Resolve a raiz efetiva do projeto para leitura da memoria persistente. * * <p>O metodo usa o escopo resolvido do projeto e prioriza: * <ol> * <li>projeto Eclipse mais proximo</li> * <li>modulo Maven mais proximo</li> * <li>raiz segura global</li> * </ol> * </p> * * @param jsonParameters parametros JSON da ferramenta * @return raiz efetiva do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private File resolverProjetoRaiz(String jsonParameters) {
         String requestedPath = support.extrairValorVariavel(jsonParameters, "path");
         File pontoInicial = support.resolverPontoInicial(rootDirectory, requestedPath);
-        return support.localizarRaizSeguraProjeto(pontoInicial, rootDirectory);
+        ResolvedProjectScope scope = support.resolverEscopoProjeto(pontoInicial, rootDirectory);
+
+        if (scope == null) {
+            return null;
+        }
+
+        if (scope.getNearestEclipseProjectRoot() != null) {
+            return scope.getNearestEclipseProjectRoot();
+        }
+
+        if (scope.getNearestMavenModuleRoot() != null) {
+            return scope.getNearestMavenModuleRoot();
+        }
+
+        return scope.getSafeRoot();
     }
 
-    /**
- * Monta uma visao resumida da memoria persistente sem despejar tudo.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-16
- */
+    /** * Monta uma visao resumida da memoria persistente sem despejar tudo. * * @param memoryPaths caminhos da memoria persistente * @param jsonSupport gateway JSON da memoria * @return resumo textual * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String montarResumoMemoria(ProjectMemoryPaths memoryPaths, ProjectMemoryJsonSupport jsonSupport) {
         JsonObject projectMemory = jsonSupport.lerJson(memoryPaths.getProjectMemoryFile());
         JsonObject branchContext = jsonSupport.lerJson(memoryPaths.getBranchContextFile());
@@ -171,6 +169,9 @@ public class ProjectMemoryQueryTool implements AgentTool, AgentToolPromptMetadat
         }
         if (discoveredPatterns.has("patterns")) {
             resumo.append("patterns: ").append(discoveredPatterns.get("patterns").toString()).append("\n");
+        }
+        if (discoveredPatterns.has("patternsAparentes")) {
+            resumo.append("patternsAparentes: ").append(discoveredPatterns.get("patternsAparentes").toString()).append("\n");
         }
 
         return resumo.toString();

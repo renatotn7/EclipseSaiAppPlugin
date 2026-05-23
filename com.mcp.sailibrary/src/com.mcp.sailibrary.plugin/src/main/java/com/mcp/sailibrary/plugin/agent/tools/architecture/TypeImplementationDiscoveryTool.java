@@ -5,17 +5,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.mcp.sailibrary.plugin.agent.AgentTool;
+import com.mcp.sailibrary.plugin.agent.context.ResolvedProjectScope;
 import com.mcp.sailibrary.plugin.agent.context.SourceInsightSupport;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
 
-/** * Localiza implementacoes de interface ou contrato por busca textual, * priorizando o mesmo modulo Maven e sinalizando framework, Hibernate, hbm.xml * e Lombok. * * @author Renato Tomaz Nati * @since 2026-05-20 */
+/** * Localiza implementacoes de interface ou contrato por busca textual, * priorizando o mesmo modulo Maven e sinalizando framework, Hibernate, hbm.xml * e Lombok. * * <p>Esta implementacao foi reforcada para trabalhar com escopo resolvido de * projeto, reduzindo o risco de trazer implementacoes de modulos ou projetos * errados em workspaces complexos.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class TypeImplementationDiscoveryTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private File rootDirectory;
     private SourceInsightSupport support;
 
+    /** * Inicializa a ferramenta de descoberta de implementacoes. * * @param rootDirectory raiz segura do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public TypeImplementationDiscoveryTool(File rootDirectory) {
         this.rootDirectory = rootDirectory;
         this.support = new SourceInsightSupport();
@@ -69,6 +71,7 @@ public class TypeImplementationDiscoveryTool implements AgentTool, AgentToolProm
         return metadata;
     }
 
+    /** * Executa a busca textual de implementacoes e sinais complementares. * * @param jsonParameters parametros JSON da ferramenta * @return relatorio textual das implementacoes e sinais encontrados * * @author Renato Tomaz Nati * @since 2026-05-20 */
     @Override
     public String execute(String jsonParameters) {
         String nomeClasse = support.extrairValorVariavel(jsonParameters, "classe");
@@ -82,9 +85,18 @@ public class TypeImplementationDiscoveryTool implements AgentTool, AgentToolProm
         int limiteResultados = support.extrairInteiro(limiteTexto, 20, 100);
 
         File pontoInicial = support.resolverPontoInicial(rootDirectory, requestedPath);
-        File raizSeguraProjeto = support.localizarRaizSeguraProjeto(pontoInicial, rootDirectory);
-        File moduloPreferencial = support.localizarModuloMavenMaisProximo(pontoInicial, raizSeguraProjeto);
-        List<File> arquivos = support.coletarArquivosModuloPrimeiro(raizSeguraProjeto, moduloPreferencial);
+        ResolvedProjectScope scope = support.resolverEscopoProjeto(pontoInicial, rootDirectory);
+
+        if (scope == null || !scope.isUsable()) {
+            return "Erro Operacional: Nao foi possivel resolver escopo seguro para localizar implementacoes.";
+        }
+
+        File raizSeguraProjeto = scope.getSafeRoot();
+        File moduloPreferencial = scope.getNearestMavenModuleRoot() != null
+                ? scope.getNearestMavenModuleRoot()
+                : scope.getEffectiveSearchRoot();
+
+        List<File> arquivos = support.coletarArquivosModuloPrimeiro(scope);
 
         List<String> implementacoes = new ArrayList<String>();
         List<String> sinaisFramework = new ArrayList<String>();
@@ -113,11 +125,13 @@ public class TypeImplementationDiscoveryTool implements AgentTool, AgentToolProm
                     List<String> marcadoresLombok = support.detectarMarcadoresLombok(conteudo);
 
                     if (!marcadoresHibernate.isEmpty()) {
-                        sinaisFramework.add("Sinal de framework em " + support.descreverArquivo(arquivoAtual) + " | Hibernate/JPA: " + juntarLista(marcadoresHibernate));
+                        sinaisFramework.add("Sinal de framework em " + support.descreverArquivo(arquivoAtual)
+                                + " | Hibernate/JPA: " + juntarLista(marcadoresHibernate));
                     }
 
                     if (!marcadoresLombok.isEmpty()) {
-                        sinaisFramework.add("Sinal de codigo gerado em " + support.descreverArquivo(arquivoAtual) + " | Lombok: " + juntarLista(marcadoresLombok));
+                        sinaisFramework.add("Sinal de codigo gerado em " + support.descreverArquivo(arquivoAtual)
+                                + " | Lombok: " + juntarLista(marcadoresLombok));
                     }
                 }
             } else if (arquivoAtual.getName().toLowerCase().endsWith(".xml")) {
@@ -129,7 +143,9 @@ public class TypeImplementationDiscoveryTool implements AgentTool, AgentToolProm
 
         StringBuilder relatorio = new StringBuilder();
         relatorio.append("Relatorio de implementacoes para [").append(nomeClasse).append("]").append("\n");
-        relatorio.append("Modulo preferencial: ").append(support.descreverArquivo(moduloPreferencial)).append("\n\n");
+        relatorio.append("safeRoot: ").append(support.descreverArquivo(raizSeguraProjeto)).append("\n");
+        relatorio.append("moduloPreferencial: ").append(support.descreverArquivo(moduloPreferencial)).append("\n");
+        relatorio.append("nearestEclipseProject: ").append(support.descreverArquivo(scope.getNearestEclipseProjectRoot())).append("\n\n");
 
         if (!implementacoes.isEmpty()) {
             relatorio.append("Implementacoes diretas encontradas:").append("\n");
@@ -157,6 +173,7 @@ public class TypeImplementationDiscoveryTool implements AgentTool, AgentToolProm
         return relatorio.toString();
     }
 
+    /** * Junta lista de marcadores em uma string compacta. * * @param valores lista de valores * @return texto unido por virgula * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String juntarLista(List<String> valores) {
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < valores.size(); i++) {
@@ -168,6 +185,7 @@ public class TypeImplementationDiscoveryTool implements AgentTool, AgentToolProm
         return builder.toString();
     }
 
+    /** * Utilitario de escape para regex textual simples. * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private static class PatternEscape {
         private static String escape(String texto) {
             String valor = texto;

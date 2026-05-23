@@ -22,12 +22,13 @@ import org.eclipse.jdt.core.dom.CompilationUnit;
 import org.eclipse.jdt.core.dom.MethodDeclaration;
 
 import com.mcp.sailibrary.plugin.agent.AgentTool;
+import com.mcp.sailibrary.plugin.agent.context.ResolvedProjectScope;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
 import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
 
-/** * Extrai evidencias concretas de HQL, SQL, JPQL, Criteria, JDBC, annotations * e XML relacionados ao trecho alvo. * * <p>Esta ferramenta foi desenhada para localizar sinais reais de persistencia * e consulta sem assumir versao especifica de framework. O objetivo e devolver * evidencias concretas e nao suposicoes abstratas sobre o comportamento do * trecho analisado.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+/** * Extrai evidencias concretas de HQL, SQL, JPQL, Criteria, JDBC, annotations * e XML relacionados ao trecho alvo. * * <p>Esta implementacao foi reforcada para trabalhar com escopo resolvido de * projeto, reduzindo o risco de buscar XMLs e fontes de modulos errados em * workspaces complexos.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class QueryExtractionTool implements AgentTool, AgentToolPromptMetadataProvider {
 
     private File rootDirectory;
@@ -598,7 +599,7 @@ public class QueryExtractionTool implements AgentTool, AgentToolPromptMetadataPr
                 tipo = "HBM_QUERY_EVIDENCE";
             }
 
-            String chave = tipo + "|" + normalizePath(xml) + "|" + nome;
+            String chave = "NAMED_QUERY_DECLARATION|" + normalizePath(xml) + "|" + nome + "|" + tipo;
             if (vistos.add(chave)) {
                 evidencias.add(tipo + " | arquivo " + normalizePath(xml) + " | name=" + nome);
             }

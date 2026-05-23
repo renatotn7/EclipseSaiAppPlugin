@@ -59,7 +59,7 @@ public class WorkspaceMutationFacade {
             return "Erro Operacional: A politica de mutacao nao permite criar este arquivo no alvo informado.";
         }
 
-        File targetFile = resolveWorkspaceFile(safeRelativePath);
+        File targetFile = resolveWorkspaceTargetFile(context, safeRelativePath);
         if (targetFile.exists()) {
             return "Erro Operacional: O arquivo alvo ja existe no workspace.";
         }
@@ -93,11 +93,15 @@ public class WorkspaceMutationFacade {
             ensureParentDirectory(targetFile);
             writeWorkspaceFile(targetFile, content);
 
-            File mirroredFile = mirrorService.mirrorWorkspaceFile(targetFile, safeRelativePath);
-            gitRepository.addPath(safeRelativePath);
+            mutationPolicy.getRegistryService().registerCreatedFile(targetFile);
+
+            String mirrorRelativePath = resolveMirrorRelativePath(context, safeRelativePath);
+
+            File mirroredFile = mirrorService.mirrorWorkspaceFile(targetFile, mirrorRelativePath);
+            gitRepository.addPath(mirrorRelativePath);
 
             String afterCommitId = safeCommitOrHead(
-                    "[BATCH=" + batchId + "] [OP=" + operationId + "] CREATE_FILE " + safeRelativePath
+                    "[BATCH=" + batchId + "] [OP=" + operationId + "] CREATE_FILE " + mirrorRelativePath
             );
 
             operation.setAfterCommitId(afterCommitId);
@@ -118,6 +122,8 @@ public class WorkspaceMutationFacade {
 
             return "Arquivo criado com sucesso.\n"
                     + "path: " + safeRelativePath + "\n"
+                    + "absolutePath: " + normalizePath(targetFile) + "\n"
+                    + "mirrorPath: " + mirrorRelativePath + "\n"
                     + "batchId: " + batchId + "\n"
                     + "operationId: " + operationId + "\n"
                     + "afterCommitId: " + afterCommitId + "\n"
@@ -284,6 +290,7 @@ public class WorkspaceMutationFacade {
             );
 
             Files.delete(targetFile.toPath());
+            mutationPolicy.getRegistryService().unregisterCreatedFile(targetFile);
 
             if (mirrorService.existsMirroredPath(safeRelativePath)) {
                 mirrorService.removeMirroredPath(safeRelativePath);
@@ -342,7 +349,7 @@ public class WorkspaceMutationFacade {
             return "Erro Operacional: A politica de mutacao nao permite criar esta package/pasta.";
         }
 
-        File targetDirectory = resolveWorkspaceFile(safeRelativePath);
+        File targetDirectory = resolveWorkspaceTargetDirectory(context, safeRelativePath);
         if (targetDirectory.exists()) {
             return "Erro Operacional: A package/pasta alvo ja existe no workspace.";
         }
@@ -378,12 +385,14 @@ public class WorkspaceMutationFacade {
                 throw new IOException("Falha ao criar package/pasta fisica no workspace.");
             }
 
-            String keepRelativePath = buildPackageKeepRelativePath(safeRelativePath);
+            String mirrorRelativePath = resolveMirrorRelativePath(context, safeRelativePath);
+            String keepRelativePath = buildPackageKeepRelativePath(mirrorRelativePath);
+
             mirrorService.writeMirroredContent(keepRelativePath, "package-created");
             gitRepository.addPath(keepRelativePath);
 
             String afterCommitId = safeCommitOrHead(
-                    "[BATCH=" + batchId + "] [OP=" + operationId + "] CREATE_PACKAGE " + safeRelativePath
+                    "[BATCH=" + batchId + "] [OP=" + operationId + "] CREATE_PACKAGE " + keepRelativePath
             );
 
             operation.setAfterCommitId(afterCommitId);
@@ -404,6 +413,8 @@ public class WorkspaceMutationFacade {
 
             return "Package/pasta criada com sucesso.\n"
                     + "path: " + safeRelativePath + "\n"
+                    + "absolutePath: " + normalizePath(targetDirectory) + "\n"
+                    + "mirrorPath: " + mirrorRelativePath + "\n"
                     + "batchId: " + batchId + "\n"
                     + "operationId: " + operationId + "\n"
                     + "afterCommitId: " + afterCommitId;
@@ -535,6 +546,7 @@ public class WorkspaceMutationFacade {
                 if (workspaceTarget.exists()) {
                     Files.delete(workspaceTarget.toPath());
                 }
+                mutationPolicy.getRegistryService().unregisterCreatedFile(workspaceTarget);
                 if (mirrorService.existsMirroredPath(relativePath)) {
                     mirrorService.removeMirroredPath(relativePath);
                 }
@@ -561,6 +573,7 @@ public class WorkspaceMutationFacade {
                     if (!restoredDelete) {
                         throw new IOException("Nao foi possivel restaurar arquivo apagado.");
                     }
+                    mutationPolicy.getRegistryService().registerCreatedFile(workspaceTarget);
                     mirrorService.mirrorWorkspaceFile(workspaceTarget, relativePath);
                     gitRepository.addPath(relativePath);
                     gitRepository.commit("[UNDO] DELETE_CREATED_FILE " + relativePath);
@@ -601,6 +614,7 @@ public class WorkspaceMutationFacade {
                     if (!restored) {
                         throw new IOException("Nao foi possivel refazer criacao do arquivo.");
                     }
+                    mutationPolicy.getRegistryService().registerCreatedFile(workspaceTarget);
                     mirrorService.mirrorWorkspaceFile(workspaceTarget, relativePath);
                     gitRepository.addPath(relativePath);
                     gitRepository.commit("[REDO] CREATE_FILE " + relativePath);
@@ -625,6 +639,7 @@ public class WorkspaceMutationFacade {
                 if (workspaceTarget.exists()) {
                     Files.delete(workspaceTarget.toPath());
                 }
+                mutationPolicy.getRegistryService().unregisterCreatedFile(workspaceTarget);
                 if (mirrorService.existsMirroredPath(relativePath)) {
                     mirrorService.removeMirroredPath(relativePath);
                 }
@@ -815,5 +830,77 @@ public class WorkspaceMutationFacade {
     /** * Retorna true quando o valor informado for nulo ou vazio. * * @param value valor a validar * @return true quando o valor for branco * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private boolean isBlank(String value) {
         return value == null || value.trim().length() == 0;
+    }
+
+    /** * Resolve arquivo absoluto real de destino para criacao de arquivo. * * @param context contexto de mutacao * @param relativePath caminho relativo * @return arquivo absoluto de destino * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private File resolveWorkspaceTargetFile(MutationContext context, String relativePath) {
+        String normalizedRelativePath = normalizeRelativePath(relativePath);
+
+        if (context != null && !isBlank(context.getTargetAbsoluteBasePath())) {
+            File baseDirectory = new File(context.getTargetAbsoluteBasePath());
+            return new File(baseDirectory, extractLeafRelativePath(context, normalizedRelativePath));
+        }
+
+        return new File(projectRootDirectory, normalizedRelativePath);
+    }
+
+    /** * Resolve diretorio absoluto real de destino para criacao de package. * * @param context contexto de mutacao * @param relativePath caminho relativo * @return diretorio absoluto de destino * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private File resolveWorkspaceTargetDirectory(MutationContext context, String relativePath) {
+        String normalizedRelativePath = normalizeRelativePath(relativePath);
+
+        if (context != null && !isBlank(context.getTargetAbsoluteBasePath())) {
+            File baseDirectory = new File(context.getTargetAbsoluteBasePath());
+            return new File(baseDirectory, normalizedRelativePath);
+        }
+
+        return new File(projectRootDirectory, normalizedRelativePath);
+    }
+
+    /** * Extrai a parte realmente filha do relativePath quando o contexto ja * carrega uma base relativa conhecida. * * @param context contexto de mutacao * @param fullRelativePath caminho relativo completo * @return trecho filho do path * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String extractLeafRelativePath(MutationContext context, String fullRelativePath) {
+        if (context == null || isBlank(context.getTargetRelativeBasePath())) {
+            return fullRelativePath;
+        }
+
+        String baseRelative = normalizeRelativePath(context.getTargetRelativeBasePath());
+        String full = normalizeRelativePath(fullRelativePath);
+
+        if (full.startsWith(baseRelative)) {
+            String child = full.substring(baseRelative.length());
+            while (child.startsWith("/")) {
+                child = child.substring(1);
+            }
+            return child;
+        }
+
+        return fullRelativePath;
+    }
+
+    /** * Resolve o caminho relativo de espelho no workspace_git. * * @param context contexto de mutacao * @param relativePath caminho relativo original * @return caminho relativo final para o mirror * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    private String resolveMirrorRelativePath(MutationContext context, String relativePath) {
+        String normalizedRelativePath = normalizeRelativePath(relativePath);
+
+        if (context != null && !isBlank(context.getTargetMirrorBaseRelativePath())) {
+            String base = context.getTargetMirrorBaseRelativePath().trim().replace("\\", "/");
+            String child = extractLeafRelativePath(context, normalizedRelativePath);
+
+            while (base.endsWith("/")) {
+                base = base.substring(0, base.length() - 1);
+            }
+            while (child.startsWith("/")) {
+                child = child.substring(1);
+            }
+
+            if (base.length() == 0) {
+                return child;
+            }
+            if (child.length() == 0) {
+                return base;
+            }
+
+            return base + "/" + child;
+        }
+
+        return normalizedRelativePath;
     }
 }

@@ -10,6 +10,7 @@ import com.mcp.sailibrary.plugin.agent.context.mutation.model.MutationOrigin;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolParameterMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadata;
 import com.mcp.sailibrary.plugin.agent.prompt.AgentToolPromptMetadataProvider;
+import com.mcp.sailibrary.plugin.agent.tools.support.ResolvedStructuralTarget;
 import com.mcp.sailibrary.plugin.agent.tools.support.StructuralTargetResolver;
 import com.mcp.sailibrary.plugin.agent.tools.support.ToolJsonSupport;
 import com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContext;
@@ -55,20 +56,17 @@ public class CreateProjectFileTool implements AgentTool, AgentToolPromptMetadata
             return "Erro Operacional: A raiz segura do projeto esta indisponivel para criacao de arquivo.";
         }
 
-        NamedStructuralContext targetContext = structuralTargetResolver.resolveContext(target);
-        if (targetContext == null) {
-            return "Erro Operacional: O alvo estrutural informado nao foi encontrado na sessao atual.";
+        ResolvedStructuralTarget resolvedTarget = structuralTargetResolver.resolveTarget(target);
+        if (resolvedTarget == null || !resolvedTarget.isUsable()) {
+            return "Erro Operacional: O alvo estrutural informado nao foi encontrado ou nao pode ser resolvido para um destino real do workspace.";
         }
 
-        File baseDirectory = structuralTargetResolver.resolveBaseDirectory(target);
-        if (baseDirectory == null || !baseDirectory.exists() || !baseDirectory.isDirectory()) {
-            return "Erro Operacional: O alvo estrutural informado nao pode ser resolvido para um diretorio real do workspace.";
-        }
+        String fullRelativePath = structuralTargetResolver.resolveChildRelativePath(target, relativePath);
+        File absoluteTargetFile = structuralTargetResolver.resolveChildFile(target, relativePath);
 
-        String fullRelativePath = joinRelativePath(
-                structuralTargetResolver.resolveRelativePath(target),
-                relativePath
-        );
+        if (absoluteTargetFile == null) {
+            return "Erro Operacional: Nao foi possivel resolver o arquivo absoluto de destino a partir do contexto estrutural informado.";
+        }
 
         MutationContext context = new MutationContext();
         context.setProjectRootDirectory(rootDirectory);
@@ -80,7 +78,12 @@ public class CreateProjectFileTool implements AgentTool, AgentToolPromptMetadata
                         ? instructionSummary
                         : "Criacao de novo arquivo pela tool criar_arquivo_projeto."
         );
-        context.setTargetName(targetContext.getName());
+        context.setTargetName(resolvedTarget.getContext().getName());
+        context.setTargetAbsoluteBasePath(resolvedTarget.getBaseDirectory().getAbsolutePath().replace("\\", "/"));
+        context.setTargetRelativeBasePath(resolvedTarget.getRelativeBasePathFromOwningProject());
+        context.setTargetOwningProjectRootPath(resolvedTarget.getOwningEclipseProjectRoot().getAbsolutePath().replace("\\", "/"));
+        context.setTargetOwningProjectName(resolvedTarget.getOwningEclipseProjectName());
+        context.setTargetMirrorBaseRelativePath(resolvedTarget.getMirrorRelativeBasePath());
         context.setOrigin(MutationOrigin.AI);
 
         try {

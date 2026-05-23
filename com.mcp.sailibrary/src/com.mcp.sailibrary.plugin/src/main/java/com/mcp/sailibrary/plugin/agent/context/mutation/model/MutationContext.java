@@ -12,7 +12,11 @@ public class MutationContext {
     private String instructionSummary;
     private String targetName;
     private MutationOrigin origin;
-
+    private String targetAbsoluteBasePath;
+    private String targetRelativeBasePath;
+    private String targetOwningProjectRootPath;
+    private String targetOwningProjectName;
+    private String targetMirrorBaseRelativePath;
     /** * Retorna o diretorio raiz do projeto associado a mutacao. * * @return raiz fisica do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     public File getProjectRootDirectory() {
         return projectRootDirectory;
@@ -89,5 +93,44 @@ public class MutationContext {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().length() == 0;
+    }
+    public String getTargetAbsoluteBasePath() {
+        return targetAbsoluteBasePath;
+    }
+
+    public void setTargetAbsoluteBasePath(String targetAbsoluteBasePath) {
+        this.targetAbsoluteBasePath = safeTrim(targetAbsoluteBasePath);
+    }
+
+    public String getTargetRelativeBasePath() {
+        return targetRelativeBasePath;
+    }
+
+    public void setTargetRelativeBasePath(String targetRelativeBasePath) {
+        this.targetRelativeBasePath = safeTrim(targetRelativeBasePath);
+    }
+
+    public String getTargetOwningProjectRootPath() {
+        return targetOwningProjectRootPath;
+    }
+
+    public void setTargetOwningProjectRootPath(String targetOwningProjectRootPath) {
+        this.targetOwningProjectRootPath = safeTrim(targetOwningProjectRootPath);
+    }
+
+    public String getTargetOwningProjectName() {
+        return targetOwningProjectName;
+    }
+
+    public void setTargetOwningProjectName(String targetOwningProjectName) {
+        this.targetOwningProjectName = safeTrim(targetOwningProjectName);
+    }
+
+    public String getTargetMirrorBaseRelativePath() {
+        return targetMirrorBaseRelativePath;
+    }
+
+    public void setTargetMirrorBaseRelativePath(String targetMirrorBaseRelativePath) {
+        this.targetMirrorBaseRelativePath = safeTrim(targetMirrorBaseRelativePath);
     }
 }

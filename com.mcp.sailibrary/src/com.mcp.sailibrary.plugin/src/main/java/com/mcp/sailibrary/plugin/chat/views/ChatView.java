@@ -159,7 +159,7 @@ public class ChatView extends ViewPart {
         CTabItem abaContexto = new CTabItem(tabFolderPrincipal, SWT.NONE);
         abaContexto.setText("Contexto");
 
-        namedBlocksPanel = new NamedBlocksPanel(tabFolderPrincipal, SWT.NONE);
+        namedBlocksPanel = new NamedBlocksPanel(tabFolderPrincipal, SWT.NONE, this);
         namedBlocksPanel.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
 
         abaContexto.setControl(namedBlocksPanel);
@@ -668,5 +668,27 @@ public class ChatView extends ViewPart {
         if (controller != null) {
             controller.sincronizarAlvoPrimarioGlobal();
         }
+    }
+    /** * Anexa um alias de contexto na entrada da conversa. * * <p>Se a entrada ja contiver texto, o alias e inserido ao final com espaco de * separacao. Se a entrada estiver vazia, o alias passa a ser o primeiro * conteudo do campo.</p> * * @param alias alias a ser inserido, como @nome * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    public void anexarAliasNaEntrada(String alias) {
+        if (inputField == null || inputField.isDisposed()) {
+            return;
+        }
+
+        String aliasSeguro = alias != null ? alias.trim() : "";
+        if (aliasSeguro.length() == 0) {
+            return;
+        }
+
+        String textoAtual = inputField.getText();
+        if (textoAtual == null || textoAtual.trim().length() == 0) {
+            inputField.setText(aliasSeguro);
+        } else {
+            String separador = textoAtual.endsWith(" ") || textoAtual.endsWith("\n") ? "" : " ";
+            inputField.setText(textoAtual + separador + aliasSeguro);
+        }
+
+        inputField.setFocus();
+        inputField.setSelection(inputField.getText().length());
     }
 }
