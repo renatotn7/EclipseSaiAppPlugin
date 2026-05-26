@@ -1,0 +1,11 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: SAI Library MCP Tests
+Bundle-SymbolicName: com.mcp.sailibrary.tests
+Bundle-Version: 1.0.0.qualifier
+Bundle-Vendor: MCP
+Fragment-Host: com.mcp.sailibrary.plugin
+Require-Bundle: org.junit
+Automatic-Module-Name: com.mcp.sailibrary.tests
+Bundle-RequiredExecutionEnvironment: JavaSE-21
+Require-Capability: osgi.ee;filter:="(&(osgi.ee=JavaSE)(version=21))"

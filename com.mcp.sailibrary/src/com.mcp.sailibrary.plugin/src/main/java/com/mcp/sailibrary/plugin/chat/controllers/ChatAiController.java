@@ -13,12 +13,23 @@ import org.eclipse.ui.texteditor.ITextEditor;
 import com.mcp.sailibrary.plugin.agent.context.ContextOrchestrator;
 import com.mcp.sailibrary.plugin.agent.context.analise.ProjectMemoryStore;
 import com.mcp.sailibrary.plugin.agent.orchestration.AgentOrchestrator;
+import com.mcp.sailibrary.plugin.chat.service.CodeApplicationService;
+import com.mcp.sailibrary.plugin.chat.service.CodeWorkspaceValidationService;
 import com.mcp.sailibrary.plugin.chat.service.McpAgentResponseService;
 import com.mcp.sailibrary.plugin.chat.service.SessionHistoryService;
+import com.mcp.sailibrary.plugin.chat.settings.ChatRuntimeSettings;
 import com.mcp.sailibrary.plugin.chat.support.AiResponse;
+import com.mcp.sailibrary.plugin.chat.support.CodeApplicationState;
 import com.mcp.sailibrary.plugin.chat.support.ToolResultSummarizer;
+import com.mcp.sailibrary.plugin.chat.support.WorkspaceCompilationValidationResult;
 import com.mcp.sailibrary.plugin.chat.views.ChatView;
-import com.mcp.sailibrary.plugin.mcp.SaiLibraryMcpClient;
+import com.mcp.sailibrary.plugin.mcp.multimodel.coordinator.AgentModelCoordinator;
+import com.mcp.sailibrary.plugin.mcp.multimodel.coordinator.MultiModelCoordinator;
+import com.mcp.sailibrary.plugin.mcp.multimodel.coordinator.SingleModelCoordinator;
+import com.mcp.sailibrary.plugin.mcp.multimodel.coverage.InvestigationCoverageTracker;
+import com.mcp.sailibrary.plugin.mcp.multimodel.policy.ComplexityProfilePolicy;
+import com.mcp.sailibrary.plugin.mcp.multimodel.policy.InvestigationCoveragePolicy;
+import com.mcp.sailibrary.plugin.mcp.multimodel.policy.InvestigationCoveragePolicy.CoveragePlan;
 import com.mcp.sailibrary.plugin.chat.blocks.model.NamedCodeBlock;
 import com.mcp.sailibrary.plugin.chat.blocks.service.EditorNavigationService;
 import com.mcp.sailibrary.plugin.chat.blocks.service.NamedBlockDocumentBindingService;
@@ -30,6 +41,13 @@ import com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContext;
 import com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContextType;
 import com.mcp.sailibrary.plugin.chat.context.service.NamedStructuralContextPromptFormatter;
 import com.mcp.sailibrary.plugin.chat.context.service.NamedStructuralContextSessionService;
+import com.mcp.sailibrary.plugin.chat.service.CodeApplicationService;
+import com.mcp.sailibrary.plugin.chat.service.MissionCycleService;
+import com.mcp.sailibrary.plugin.chat.service.MissionToolStepService;
+import com.mcp.sailibrary.plugin.chat.service.MissionToolStepService.ToolStepResult;
+import com.mcp.sailibrary.plugin.chat.support.CodeApplicationResult;
+import com.mcp.sailibrary.plugin.chat.support.CodeApplicationState;
+import com.mcp.sailibrary.plugin.chat.support.MissionExecutionContext;
 /**
  * Isolar a logica de negocio, manipulacao de AST e integracao com IA da camada visual.
  *
@@ -63,26 +81,40 @@ public class ChatAiController {
     private NamedStructuralContextSessionService namedStructuralContextSessionService;
     private NamedStructuralContextPromptFormatter namedStructuralContextPromptFormatter;
     private EditorNavigationService editorNavigationService;
+    private AgentModelCoordinator agentModelCoordinator;
+	private CodeWorkspaceValidationService codeWorkspaceValidationService;
+	private ComplexityProfilePolicy complexityProfilePolicy;
+	private InvestigationCoveragePolicy investigationCoveragePolicy;
+	private CodeApplicationService codeApplicationService;
+	private MissionCycleService missionCycleService;
+	private MissionToolStepService missionToolStepService;
     /**
  * Construtor principal do controlador visual.
  *
  * @author Renato Tomaz Nati
  * @since 2026-05-18
  */
-    public ChatAiController(ChatView view) {
-        this.contextOrchestrator = new ContextOrchestrator();
-        this.sessionHistoryService = new SessionHistoryService();
-        this.toolResultPresenter = new ToolResultSummarizer();
-        this.mcpResponseService = new McpAgentResponseService();
-        this.namedBlockSessionService = NamedBlockSessionService.getInstance();
-        this.namedBlockPromptFormatter = new NamedBlockPromptFormatter();
-        this.namedBlockDocumentBindingService = new NamedBlockDocumentBindingService();
-        this.namedBlockHighlighter = NamedBlockHighlighter.getInstance();
-        this.namedStructuralContextSessionService = NamedStructuralContextSessionService.getInstance();
-        this.namedStructuralContextPromptFormatter = new NamedStructuralContextPromptFormatter();
-        this.editorNavigationService = new EditorNavigationService();
-        this.view = view;
-    }
+	public ChatAiController(ChatView view) {
+	    this.contextOrchestrator = new ContextOrchestrator();
+	    this.sessionHistoryService = new SessionHistoryService();
+	    this.toolResultPresenter = new ToolResultSummarizer();
+	    this.mcpResponseService = new McpAgentResponseService();
+	    this.namedBlockSessionService = NamedBlockSessionService.getInstance();
+	    this.namedBlockPromptFormatter = new NamedBlockPromptFormatter();
+	    this.namedBlockDocumentBindingService = new NamedBlockDocumentBindingService();
+	    this.namedBlockHighlighter = NamedBlockHighlighter.getInstance();
+	    this.namedStructuralContextSessionService = NamedStructuralContextSessionService.getInstance();
+	    this.namedStructuralContextPromptFormatter = new NamedStructuralContextPromptFormatter();
+	    this.editorNavigationService = new EditorNavigationService();
+	    this.agentModelCoordinator = new MultiModelCoordinator();
+	    this.codeWorkspaceValidationService = new CodeWorkspaceValidationService();
+	    this.complexityProfilePolicy = new ComplexityProfilePolicy();
+	    this.investigationCoveragePolicy = new InvestigationCoveragePolicy();
+	    this.codeApplicationService = new CodeApplicationService();
+	    this.missionCycleService = new MissionCycleService();
+	    this.missionToolStepService = new MissionToolStepService();
+	    this.view = view;
+	}
 
     /**
  * Alterna o modo debug da sessao atual.
@@ -93,7 +125,56 @@ public class ChatAiController {
     public void setDebugAtivo(boolean debugAtivo) {
         this.debug = debugAtivo;
     }
+    /** * Caller: aplicarRespostaIA * Callee: CodeWorkspaceValidationService.validarEstadoAtual * Objetivo: Validar o estado real do workspace apos uma mutacao no codigo. * Feature: Impede que codigo quebrado seja tratado como sucesso. * Data modificacao: 2026-05-24 00:00 * * @return resultado estruturado da validacao * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private WorkspaceCompilationValidationResult validarWorkspaceAposMutacao() {
+        if (codeWorkspaceValidationService == null) {
+            return new WorkspaceCompilationValidationResult();
+        }
 
+        return codeWorkspaceValidationService.validarEstadoAtual(compUnit);
+    }
+    
+    /** * Caller: executarMissaoIA * Callee: N/A * Objetivo: Inicializar o rastreador de cobertura investigativa da missao atual. * Data modificacao: 2026-05-24 00:00 * * @return rastreador novo da missao * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private InvestigationCoverageTracker criarRastreadorCobertura() {
+        return new InvestigationCoverageTracker();
+    }
+    /** * Caller: executarMissaoIA * Callee: InvestigationCoveragePolicy.registrarUsoFerramenta * Objetivo: Alimentar a cobertura investigativa da missao com base na * ferramenta executada e no resultado observado. * Data modificacao: 2026-05-24 00:00 * * @param plan plano de cobertura da missao * @param nomeFerramenta nome da ferramenta executada * @param resultadoFerramenta resultado bruto da ferramenta * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private void registrarCoberturaFerramentaExecutada(InvestigationCoveragePolicy.CoveragePlan plan, String nomeFerramenta, String resultadoFerramenta) {
+        if (investigationCoveragePolicy == null || plan == null) {
+            return;
+        }
+
+        investigationCoveragePolicy.registrarUsoFerramenta(plan, nomeFerramenta, resultadoFerramenta);
+    }
+    /** * Caller: executarMissaoIA * Callee: InvestigationCoveragePolicy.podeConcluir * Objetivo: Verificar se a cobertura investigativa minima da missao atual ja * foi atingida antes de permitir uma conclusao final. * Data modificacao: 2026-05-24 00:00 * * @param plan plano atual de cobertura * @return true quando a cobertura minima estiver satisfeita * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private boolean podeConcluirComCoberturaAtual(InvestigationCoveragePolicy.CoveragePlan plan) {
+        if (investigationCoveragePolicy == null) {
+            return true;
+        }
+
+        return investigationCoveragePolicy.podeConcluir(plan);
+    }
+    /** * Caller: executarMissaoIA * Callee: InvestigationCoveragePolicy.buildPendenciasMensagem * Objetivo: Montar o reforco textual quando ainda faltar cobertura minima de * investigacao antes da conclusao. * Data modificacao: 2026-05-24 00:00 * * @param plan plano atual * @return mensagem de pendencias * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private String montarInstrucaoCoberturaPendente(InvestigationCoveragePolicy.CoveragePlan plan) {
+        if (investigationCoveragePolicy == null || plan == null) {
+            return "";
+        }
+
+        return investigationCoveragePolicy.buildPendenciasMensagem(plan);
+    }
+    /** * Caller: aplicarRespostaIA * Callee: IDocument.replace * Objetivo: Restaurar o estado anterior do trecho quando a validacao do * workspace detectar erro real apos a mutacao. * Data modificacao: 2026-05-24 00:00 * * @param offsetInicial offset inicial da alteracao * @param comprimentoNovo comprimento do conteudo aplicado * @param conteudoAnterior conteudo original do trecho * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private void restaurarEstadoAnteriorAposFalha(int offsetInicial, int comprimentoNovo, String conteudoAnterior) {
+        if (document == null || offsetInicial < 0) {
+            return;
+        }
+
+        try {
+            document.replace(offsetInicial, comprimentoNovo, conteudoAnterior != null ? conteudoAnterior : "");
+        } catch (Exception e) {
+            System.out.println("[WORKSPACE VALIDATION DEBUG] Falha ao restaurar estado anterior: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
     /**
  * Localiza a raiz segura do projeto subindo a arvore ate encontrar .git ou .project.
  *
@@ -658,12 +739,7 @@ public class ChatAiController {
         atualizarStatusNaView("Sem editor alvo para retorno");
     }
 
-    /**
- * Cancela a missao atual e limpa o estado local do controlador.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-18
- */
+    /** * Cancela a missao atual e limpa o estado local do controlador. * * @author Renato Tomaz Nati * @since 2026-05-18 */
     public void abandonarMissao() {
         this.missaoCancelada = true;
         this.tokenMissaoAtual++;
@@ -680,6 +756,7 @@ public class ChatAiController {
         view.atualizarResumoAlvo("Nenhum alvo ativo");
         atualizarStatusNaView("Operacao cancelada");
         view.adicionarMensagem("Sistema", "Operacao abandonada. Selecao desbloqueada e cache limpo.");
+        registrarAtividadeOperacional("CANCELAMENTO", "Operacao cancelada pelo usuario.");
     }
     /**
  * Adiciona item ao historico da sessao com protecao simples de concorrencia.
@@ -699,13 +776,9 @@ public class ChatAiController {
         return !missaoCancelada && tokenMissaoAtual == tokenMissao;
     }
 
-    /**
- * Executa a missao da IA em background sem travar a interface.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-18
- */
     public void executarMissaoIA(final String instrucao, final int profundidadeMax, final String pedidoOriginal) {
+        registrarAtividadeOperacional("MISSAO", "Preparando contexto da missao.");
+
         if (document == null || selection == null) {
             sincronizarAlvoPrimarioGlobal();
         }
@@ -713,6 +786,7 @@ public class ChatAiController {
         if ((document == null || selection == null) && !possuiContextoEstruturalUtilizavel()) {
             view.adicionarMensagem("Sistema", "Erro operacional: Nenhum documento, selecao ou contexto estrutural utilizavel foi encontrado. Defina um PRIMARY valido, selecione um trecho ou use um contexto estrutural nomeado adequado.");
             atualizarStatusNaView("Nenhum alvo operacional ativo");
+            registrarAtividadeOperacional("ERRO", "Nenhum alvo operacional ou estrutural utilizavel foi encontrado.");
             return;
         }
 
@@ -728,7 +802,6 @@ public class ChatAiController {
         final IDocument documentSnapshot = this.document;
         final ITextSelection selectionSnapshot = this.selection;
         final ICompilationUnit compUnitSnapshot = this.compUnit;
-        final ITextEditor textEditorSnapshot = this.textEditor;
 
         File raizTemp = null;
         if (compUnitSnapshot != null && compUnitSnapshot.getJavaProject() != null && compUnitSnapshot.getJavaProject().getProject() != null) {
@@ -742,140 +815,238 @@ public class ChatAiController {
 
         final int offsetAtual = (selectionSnapshot != null) ? selectionSnapshot.getOffset() : 0;
 
+        view.limparAtividadesAgente();
+        registrarAtividadeOperacional("MISSAO", "Nova execucao iniciada pelo usuario.");
         view.alternarCarregamento(true);
         view.adicionarMensagem("Sistema", "Reconhecimento assincrono iniciado. Aguardando processamento da IA.");
+        view.adicionarMensagem("Sistema", "Se quiser acompanhar a atividade detalhada do agente, abra a aba Atividade.");
         atualizarStatusNaView("Preparando contexto da missao");
+        reconfigurarCoordenadorModelosAtual();
+
+        final InvestigationCoveragePolicy.CoveragePlan coveragePlan =
+                investigationCoveragePolicy != null
+                        ? investigationCoveragePolicy.createPlan(
+                                view != null ? view.getPerfilRaciocinioConfigurado() : ChatRuntimeSettings.PERFIL_PADRAO,
+                                instrucaoSnapshot
+                        )
+                        : null;
+
+        final MissionExecutionContext contextoMissao = criarMissionExecutionContext(
+                instrucaoSnapshot,
+                pedidoOriginalSnapshot,
+                tokenMissao,
+                coveragePlan,
+                raizProjeto,
+                offsetAtual
+        );
 
         Thread missaoThread = new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
+                    registrarAtividadeOperacional("CONTEXTO", "Construindo contexto inicial.");
                     atualizarStatusNaView("Construindo contexto inicial");
 
                     if (!missaoAindaAtiva(tokenMissao)) {
                         return;
                     }
 
-                    String instrucaoEnriquecida = construirInstrucaoFinal(instrucaoSnapshot, compUnitSnapshot, selectionSnapshot, profundidadeMax);
+                    String instrucaoEnriquecida = construirInstrucaoFinal(
+                            instrucaoSnapshot,
+                            compUnitSnapshot,
+                            selectionSnapshot,
+                            profundidadeMax,
+                            coveragePlan
+                    );
 
-                    AgentOrchestrator orquestrador = new AgentOrchestrator(raizProjeto, compUnitSnapshot, offsetAtual);
+                    contextoMissao.setInstrucaoEnriquecida(instrucaoEnriquecida);
 
-                    final ProjectMemoryStore projectMemoryStoreLocal = new ProjectMemoryStore(raizProjeto);
+                    AgentOrchestrator orquestrador = new AgentOrchestrator(
+                            contextoMissao.getRaizProjeto(),
+                            compUnitSnapshot,
+                            contextoMissao.getOffsetAtual()
+                    );
+
+                    final ProjectMemoryStore projectMemoryStoreLocal = new ProjectMemoryStore(contextoMissao.getRaizProjeto());
                     ChatAiController.this.projectMemoryStore = projectMemoryStoreLocal;
 
                     projectMemoryStoreLocal.inicializarEstrutura();
                     projectMemoryStoreLocal.atualizarBranchContexto();
-                    projectMemoryStoreLocal.registrarProjectMemoryBasica(raizProjeto.getAbsolutePath());
+                    projectMemoryStoreLocal.registrarProjectMemoryBasica(contextoMissao.getRaizProjeto().getAbsolutePath());
 
                     String resumoMemoriaProjeto = projectMemoryStoreLocal.consultarResumoMemoria();
                     if (resumoMemoriaProjeto != null && resumoMemoriaProjeto.trim().length() > 0) {
-                        instrucaoEnriquecida += "\n\n=== MEMORIA PERSISTENTE DO PROJETO ===\n"
-                                + resumoMemoriaProjeto
-                                + "\n======================================\n";
+                        contextoMissao.setInstrucaoEnriquecida(
+                                contextoMissao.getInstrucaoEnriquecida()
+                                        + "\n\n=== MEMORIA PERSISTENTE DO PROJETO ===\n"
+                                        + resumoMemoriaProjeto
+                                        + "\n======================================\n"
+                        );
                     }
 
-                    int iteracoesMaximas = 30;
-                    int iteracaoAtual = 0;
-                    boolean missaoConcluida = false;
-                    boolean correcaoFormatoJaSolicitada = false;
+                    if (investigationCoveragePolicy != null && contextoMissao.getCoveragePlan() != null) {
+                        investigationCoveragePolicy.registrarFonteDeProjetoViaMemoria(contextoMissao.getCoveragePlan(), resumoMemoriaProjeto);
+                    }
 
                     AiResponse ultimaRespostaEstruturadaValida = null;
-                    String ultimoResultadoFerramentaBruto = "";
-                    String ultimoNomeFerramenta = "";
-                    String ultimoResumoFerramenta = "";
 
-                    int extensoesPermitidas = 1;
-                    int extensoesUsadas = 0;
-                    boolean alertaProximidadeEnviado = false;
+                    while (contextoMissao.getIteracaoAtual() < contextoMissao.getIteracoesMaximas()
+                            && !contextoMissao.isMissaoConcluida()) {
 
-                    while (iteracaoAtual < iteracoesMaximas && !missaoConcluida) {
-                        iteracaoAtual++;
-                        atualizarStatusNaView("Ciclo " + iteracaoAtual + " de " + iteracoesMaximas + " em andamento");
+                        contextoMissao.avancarIteracao();
+
+                        atualizarStatusNaView("Ciclo " + contextoMissao.getIteracaoAtual() + " de " + contextoMissao.getIteracoesMaximas() + " em andamento");
+                        registrarAtividadeOperacional("CICLO", "Executando ciclo " + contextoMissao.getIteracaoAtual() + " de " + contextoMissao.getIteracoesMaximas() + ".");
 
                         if (!missaoAindaAtiva(tokenMissao)) {
                             return;
                         }
 
-                        String respostaMcpBruta = SaiLibraryMcpClient.callDesenvolvimentoGpt5(selectedCodeSnapshot, fullFileTextSnapshot, instrucaoEnriquecida, apiKeySnapshot);
-                        String textoMcpExtraido = mcpResponseService.extrairTextoMcp(respostaMcpBruta);
+                        registrarAtividadeOperacional("PLANEJAMENTO", "Acionando coordenador de modelos.");
+                        AiResponse respostaIA = agentModelCoordinator.executarMissao(
+                                selectedCodeSnapshot,
+                                fullFileTextSnapshot,
+                                contextoMissao.getInstrucaoEnriquecida(),
+                                apiKeySnapshot
+                        );
 
-                        if (debug) {
-                            view.adicionarMensagemAssincrona("DEBUG", "TEXTO MCP BRUTO:\n" + textoMcpExtraido);
+                        if (respostaIA == null) {
+                            view.adicionarMensagemAssincrona("Sistema", "Falha operacional: o coordenador de modelos retornou resposta nula.");
+                            view.adicionarMensagemAssincrona("Sistema", "Percebi uma falha de infraestrutura ou parse da resposta do modelo. Se quiser, posso investigar a causa.");
+                            atualizarStatusNaView("Falha no coordenador de modelos");
+                            registrarAtividadeOperacional("ERRO", "O coordenador de modelos retornou resposta nula.");
+                            return;
                         }
 
-                        AiResponse respostaIA = mcpResponseService.interpretarRespostaIA(textoMcpExtraido);
-                        respostaIA = mcpResponseService.normalizarProtocoloFerramentaLegado(respostaIA);
-                        
-                        if (mcpResponseService.respostaEstruturadaValida(respostaIA)) {
-                            ultimaRespostaEstruturadaValida = respostaIA;
+                        if (debug) {
+                            StringBuilder mensagemDebug = new StringBuilder();
+
+                            mensagemDebug.append("COORDENADOR DE MODELOS").append(System.lineSeparator());
+                            mensagemDebug.append("selectedCodeLength=").append(selectedCodeSnapshot != null ? selectedCodeSnapshot.length() : 0).append(System.lineSeparator());
+                            mensagemDebug.append("fullFileTextLength=").append(fullFileTextSnapshot != null ? fullFileTextSnapshot.length() : 0).append(System.lineSeparator());
+                            mensagemDebug.append("instrucaoLength=").append(contextoMissao.getInstrucaoEnriquecida() != null ? contextoMissao.getInstrucaoEnriquecida().length() : 0).append(System.lineSeparator());
+                            mensagemDebug.append("apiKeyConfigured=").append(apiKeySnapshot != null && apiKeySnapshot.trim().length() > 0 ? "true" : "false").append(System.lineSeparator());
+                            mensagemDebug.append(System.lineSeparator());
+
+                            mensagemDebug.append("RESPOSTA ESTRUTURADA").append(System.lineSeparator());
+                            mensagemDebug.append("action=").append(respostaIA.getAction()).append(System.lineSeparator());
+                            mensagemDebug.append("tool=").append(respostaIA.getTool()).append(System.lineSeparator());
+                            mensagemDebug.append("question=").append(respostaIA.getQuestion()).append(System.lineSeparator());
+                            mensagemDebug.append("explanation=").append(respostaIA.getExplanation()).append(System.lineSeparator());
+
+                            if (respostaIA.getParameters() != null) {
+                                try {
+                                    mensagemDebug.append("parameters=").append(mcpResponseService.serializarParametrosFerramenta(respostaIA.getParameters())).append(System.lineSeparator());
+                                } catch (Exception e) {
+                                    mensagemDebug.append("parameters=[falha ao serializar]").append(System.lineSeparator());
+                                }
+                            } else {
+                                mensagemDebug.append("parameters=null").append(System.lineSeparator());
+                            }
+
+                            if (respostaIA.getContent() != null) {
+                                String conteudoDebug = respostaIA.getContent();
+                                if (conteudoDebug.length() > 1200) {
+                                    conteudoDebug = conteudoDebug.substring(0, 1200) + "\n[DEBUG]: Conteudo truncado para preservar legibilidade.";
+                                }
+                                mensagemDebug.append("content=").append(conteudoDebug).append(System.lineSeparator());
+                            } else {
+                                mensagemDebug.append("content=null").append(System.lineSeparator());
+                            }
+
+                            view.adicionarMensagemAssincrona("DEBUG", mensagemDebug.toString());
                         }
 
                         if (!mcpResponseService.respostaEstruturadaValida(respostaIA)) {
-                            if (correcaoFormatoJaSolicitada) {
-                                view.adicionarMensagemAssincrona("IA", "Falha de protocolo: " + textoMcpExtraido);
-                                atualizarStatusNaView("Falha de protocolo da IA");
-                                return;
-                            }
+                            StringBuilder detalheFalhaProtocolo = new StringBuilder();
+                            detalheFalhaProtocolo.append("Falha de protocolo da IA.");
+                            detalheFalhaProtocolo.append(System.lineSeparator());
+                            detalheFalhaProtocolo.append("action=").append(respostaIA.getAction());
+                            detalheFalhaProtocolo.append(System.lineSeparator());
+                            detalheFalhaProtocolo.append("tool=").append(respostaIA.getTool());
+                            detalheFalhaProtocolo.append(System.lineSeparator());
+                            detalheFalhaProtocolo.append("question=").append(respostaIA.getQuestion());
+                            detalheFalhaProtocolo.append(System.lineSeparator());
+                            detalheFalhaProtocolo.append("explanation=").append(respostaIA.getExplanation());
 
-                            correcaoFormatoJaSolicitada = true;
-                            instrucaoEnriquecida += mcpResponseService.construirInstrucaoCorrecaoFormato(textoMcpExtraido);
-                            atualizarStatusNaView("Solicitando correcao de formato da IA");
-                            continue;
+                            view.adicionarMensagemAssincrona("IA", detalheFalhaProtocolo.toString());
+                            atualizarStatusNaView("Falha de protocolo da IA");
+                            registrarAtividadeOperacional("ERRO", "Resposta da IA nao respeitou o protocolo interno.");
+                            return;
                         }
+                        if (isRespostaDeFalhaTecnicaModelo(respostaIA)) {
+                            contextoMissao.setMissaoConcluida(true);
+                            sessionHistoryService.adicionar("[IA - FALHA_INFRA]: " + respostaIA.getExplanation());
+                            view.adicionarMensagemAssincrona("IA", mcpResponseService.formatarRespostaIA(respostaIA, documentSnapshot));
+                            atualizarStatusNaView("Falha tecnica do modelo");
+                            registrarAtividadeOperacional("ERRO", "Falha tecnica de infraestrutura detectada no provider/modelo. Encerrando ciclo sem forcar nova investigacao.");
+                            return;
+                        }
+                        ultimaRespostaEstruturadaValida = respostaIA;
 
-                        if (respostaIA.getExplanation() != null) {
+                        boolean houveExtensao = missionCycleService.processarSinalizacaoDeProximidade(contextoMissao, respostaIA);
+                        if (houveExtensao) {
+                            view.adicionarMensagemAssincrona("Sistema", "Relatorio de Status: A IA reportou estar muito proxima da solucao. Extensao de perimetro concedida.");
+                            atualizarStatusNaView("Extensao de ciclos concedida");
+                            registrarAtividadeOperacional("SISTEMA", "Extensao de ciclos concedida pela proximidade da solucao.");
+                        } else if (respostaIA.getExplanation() != null) {
                             String explanation = respostaIA.getExplanation().toUpperCase();
-                            if (explanation.contains("[PERTO_DA_SOLUCAO]") && extensoesUsadas < extensoesPermitidas && iteracaoAtual >= (iteracoesMaximas - 3)) {
-                                iteracoesMaximas += 10;
-                                extensoesUsadas++;
-                                view.adicionarMensagemAssincrona("Sistema", "Relatorio de Status: A IA reportou estar muito proxima da solucao. Extensao de perimetro concedida.");
-                                atualizarStatusNaView("Extensao de ciclos concedida");
-                            } else if (explanation.contains("[LONGE_DA_SOLUCAO]") && !explanation.contains("[PERTO_DA_SOLUCAO]")) {
+                            if (explanation.contains("[LONGE_DA_SOLUCAO]") && !explanation.contains("[PERTO_DA_SOLUCAO]")) {
                                 view.adicionarMensagemAssincrona("Sistema", "Relatorio de Status: A IA relatou baixa visibilidade sobre o alvo. Limite estrito mantido.");
                                 atualizarStatusNaView("IA reportou baixa visibilidade");
+                                registrarAtividadeOperacional("SISTEMA", "IA reportou baixa visibilidade sobre o alvo.");
                             }
                         }
 
                         if ("executar_ferramenta".equalsIgnoreCase(respostaIA.getAction())) {
-                            correcaoFormatoJaSolicitada = false;
-
                             String nomeFerramenta = respostaIA.getTool();
                             String parametrosFerramenta = mcpResponseService.serializarParametrosFerramenta(respostaIA.getParameters());
 
-                            if (nomeFerramenta == null || nomeFerramenta.trim().length() == 0) {
-                                view.adicionarMensagemAssincrona("Sistema", "Erro operacional: A IA solicitou ferramenta sem informar o nome.");
-                                atualizarStatusNaView("Erro de ferramenta sem nome");
+                            atualizarStatusNaView("Executando " + nomeFerramenta);
+                            registrarAtividadeOperacional("TOOL", "Executando ferramenta " + nomeFerramenta + ".");
+
+                            view.adicionarMensagemAssincrona("Sistema",
+                                    "[Ciclo " + contextoMissao.getIteracaoAtual() + "/" + contextoMissao.getIteracoesMaximas() + "] Executando ferramenta: "
+                                            + nomeFerramenta + " " + parametrosFerramenta + " Porque: " + respostaIA.getExplanation());
+
+                            ToolStepResult resultadoTool = missionToolStepService.executarFerramenta(
+                                    nomeFerramenta,
+                                    parametrosFerramenta,
+                                    orquestrador,
+                                    toolResultPresenter,
+                                    projectMemoryStoreLocal,
+                                    sessionHistoryService,
+                                    investigationCoveragePolicy,
+                                    contextoMissao.getCoveragePlan(),
+                                    contextoMissao
+                            );
+
+                            if (!resultadoTool.isSucesso()) {
+                                view.adicionarMensagemAssincrona("Sistema", resultadoTool.getMensagemErro());
+                                atualizarStatusNaView("Erro de ferramenta");
+                                registrarAtividadeOperacional("ERRO", resultadoTool.getMensagemErro());
                                 return;
                             }
 
-                            atualizarStatusNaView("Executando " + nomeFerramenta);
+                            if (investigationCoveragePolicy != null && contextoMissao.getCoveragePlan() != null) {
+                                registrarAtividadeOperacional("COBERTURA", investigationCoveragePolicy.buildPendenciasMensagem(contextoMissao.getCoveragePlan()));
+                            }
 
-                            view.adicionarMensagemAssincrona("Sistema", "[Ciclo " + iteracaoAtual + "/" + iteracoesMaximas + "] Executando ferramenta: " + nomeFerramenta + " " + parametrosFerramenta + " Porque: " + respostaIA.getExplanation());
-
-                            String resultadoFerramenta = orquestrador.dispatch(nomeFerramenta, parametrosFerramenta);
-                            String resultadoFerramentaParaChat = toolResultPresenter.resumirParaChat(nomeFerramenta, parametrosFerramenta, resultadoFerramenta);
-                            String resultadoFerramentaParaMemoria = toolResultPresenter.resumirParaMemoria(resultadoFerramentaParaChat);
-                            
-                            ultimoResultadoFerramentaBruto = resultadoFerramenta;
-                            ultimoNomeFerramenta = nomeFerramenta;
-                            ultimoResumoFerramenta = resultadoFerramentaParaChat;
-
-                            projectMemoryStoreLocal.registrarToolHistory(nomeFerramenta, parametrosFerramenta, resultadoFerramentaParaMemoria);
-
-                            sessionHistoryService.adicionar("[Ferramenta - " + nomeFerramenta + "]: " + resultadoFerramentaParaMemoria);
-
-                            if ("ler_conteudo_arquivo".equals(nomeFerramenta) || "buscar_texto_projeto".equals(nomeFerramenta) || "explorar_diretorio".equals(nomeFerramenta)) {
+                            if ("ler_conteudo_arquivo".equals(nomeFerramenta)
+                                    || "buscar_texto_projeto".equals(nomeFerramenta)
+                                    || "explorar_diretorio".equals(nomeFerramenta)) {
                                 view.adicionarMensagemAssincrona("Ferramenta", nomeFerramenta + System.lineSeparator() + "Parametros: " + parametrosFerramenta);
                             } else {
                                 view.adicionarMensagemAssincrona("Ferramenta", nomeFerramenta + System.lineSeparator()
                                         + "Parametros: " + parametrosFerramenta + System.lineSeparator()
                                         + "Resultado resumido:" + System.lineSeparator()
-                                        + resultadoFerramentaParaChat);
+                                        + resultadoTool.getResultadoParaChat());
                             }
 
-                            instrucaoEnriquecida += "\n\n=== RESULTADO DA FERRAMENTA [" + nomeFerramenta + "] ===\n"
+                            String novaInstrucao = contextoMissao.getInstrucaoEnriquecida()
+                                    + "\n\n=== RESULTADO DA FERRAMENTA [" + nomeFerramenta + "] ===\n"
                                     + "PARAMETROS: " + parametrosFerramenta + "\n"
-                                    + resultadoFerramenta
+                                    + resultadoTool.getResultadoBruto()
                                     + "\n=========================================\n"
                                     + "Regras obrigatorias apos usar ferramenta:\n"
                                     + "1. Reutilize a raiz segura e os caminhos relativos descobertos.\n"
@@ -885,54 +1056,86 @@ public class ChatAiController {
                                     + "5. Se o metodo atual delega para um DAO, priorize localizar o DAO e seus metodos em vez de reler a mesma classe.\n"
                                     + "6. Responda com um JSON valido contendo action, content e explanation.";
 
-                            if (!alertaProximidadeEnviado && (iteracoesMaximas - iteracaoAtual) <= 2) {
-                                instrucaoEnriquecida += "\n\n[ALERTA DE SISTEMA]: O limite de ciclos autonomos esta acabando. Na sua proxima explanation, inclua obrigatoriamente a tag [PERTO_DA_SOLUCAO] ou [LONGE_DA_SOLUCAO].";
-                                alertaProximidadeEnviado = true;
+                            contextoMissao.setInstrucaoEnriquecida(novaInstrucao);
+
+                            if (missionCycleService.deveEmitirAlertaProximidade(contextoMissao)) {
+                                contextoMissao.setInstrucaoEnriquecida(
+                                        missionCycleService.anexarAlertaProximidade(contextoMissao.getInstrucaoEnriquecida())
+                                );
+                                contextoMissao.setAlertaProximidadeEnviado(true);
                             }
 
                             continue;
                         }
 
-                        if (iteracaoAtual == 1) {
-                        	sessionHistoryService.adicionar("[Usuario]: " + instrucaoSnapshot);
+                        if (missionCycleService.deveForcarNovaInvestigacao(
+                                respostaIA,
+                                investigationCoveragePolicy,
+                                contextoMissao.getCoveragePlan())) {
+
+                            contextoMissao.setInstrucaoEnriquecida(
+                                    missionCycleService.construirInstrucaoCoberturaPendente(
+                                            contextoMissao.getInstrucaoEnriquecida(),
+                                            investigationCoveragePolicy,
+                                            contextoMissao.getCoveragePlan()
+                                    )
+                            );
+
+                            registrarAtividadeOperacional("COBERTURA", "Cobertura minima ainda nao satisfeita. Forcando nova investigacao.");
+                            continue;
+                        }
+
+                        if (contextoMissao.getIteracaoAtual() == 1) {
+                            sessionHistoryService.adicionar("[Usuario]: " + instrucaoSnapshot);
                         }
 
                         if ("perguntar_ao_usuario".equalsIgnoreCase(respostaIA.getAction())) {
-                            missaoConcluida = true;
+                            contextoMissao.setMissaoConcluida(true);
                             sessionHistoryService.adicionar("[IA - Pergunta]: " + respostaIA.getQuestion());
                             view.adicionarMensagemAssincrona("IA", mcpResponseService.montarPerguntaAoUsuario(respostaIA));
-                            atualizarStatusNaView("IA aguardando resposta do usuario");
+
+                            if (isPerguntaDeFalhaTecnicaAuditoria(respostaIA)) {
+                                atualizarStatusNaView("Confirmacao do usuario requerida por falha tecnica da auditoria");
+                                registrarAtividadeOperacional("AUDITORIA", "Falha tecnica da auditoria. Aguardando confirmacao do usuario para seguir sem auditoria final.");
+                            } else {
+                                atualizarStatusNaView("IA aguardando resposta do usuario");
+                                registrarAtividadeOperacional("RESPOSTA", "IA aguardando resposta do usuario.");
+                            }
+
                             return;
                         }
 
                         if ("responder_ao_usuario".equalsIgnoreCase(respostaIA.getAction()) || "explicar".equalsIgnoreCase(respostaIA.getAction())) {
-                            missaoConcluida = true;
+                            contextoMissao.setMissaoConcluida(true);
                             sessionHistoryService.adicionar("[IA - " + respostaIA.getAction() + "]: " + respostaIA.getExplanation());
                             view.adicionarMensagemAssincrona("IA", mcpResponseService.formatarRespostaIA(respostaIA, documentSnapshot));
                             atualizarStatusNaView("Resposta final entregue");
+                            registrarAtividadeOperacional("RESPOSTA", "Resposta final preparada para o usuario.");
                             return;
                         }
 
-                        missaoConcluida = true;
+                        contextoMissao.setMissaoConcluida(true);
 
                         if (!pareceAcaoDeEdicao(respostaIA.getAction())) {
-                        	sessionHistoryService.adicionar("[IA - " + respostaIA.getAction() + "]: " + respostaIA.getExplanation());
+                            sessionHistoryService.adicionar("[IA - " + respostaIA.getAction() + "]: " + respostaIA.getExplanation());
                             view.adicionarMensagemAssincrona("IA", mcpResponseService.formatarRespostaIA(respostaIA, documentSnapshot));
                             atualizarStatusNaView("Resposta nao destrutiva entregue");
+                            registrarAtividadeOperacional("RESPOSTA", "Resposta nao destrutiva entregue.");
                             return;
                         }
 
                         sessionHistoryService.adicionar("[IA - " + respostaIA.getAction() + "]: " + respostaIA.getExplanation());
 
                         if ("substituir".equalsIgnoreCase(respostaIA.getAction())) {
-                        	if (!conteudoCompativelComSelecao(respostaIA.getContent(), selectedCodeSnapshot)) {
+                            if (!conteudoCompativelComSelecao(respostaIA.getContent(), selectedCodeSnapshot)) {
                                 view.adicionarMensagemAssincrona("Sistema", "Alerta: Conteudo incompativel com a selecao. Substituicao abortada por seguranca.");
                                 view.adicionarMensagemAssincrona("IA", mcpResponseService.formatarRespostaIA(respostaIA, documentSnapshot));
                                 atualizarStatusNaView("Substituicao bloqueada por seguranca");
+                                registrarAtividadeOperacional("ERRO", "Conteudo de substituicao rejeitado por seguranca.");
                                 return;
                             }
 
-                        	String conteudoNormalizado = normalizarFormatacao(respostaIA.getContent(), documentSnapshot, selectionSnapshot);
+                            String conteudoNormalizado = normalizarFormatacao(respostaIA.getContent(), documentSnapshot, selectionSnapshot);
 
                             final AiResponse respostaFinal = new AiResponse();
                             respostaFinal.setAction(respostaIA.getAction());
@@ -942,10 +1145,11 @@ public class ChatAiController {
                             Display.getDefault().asyncExec(new Runnable() {
                                 public void run() {
                                     try {
-                                    	if (!missaoAindaAtiva(tokenMissao)) {
-                                    	    return;
-                                    	}
-                                    	aplicarRespostaIA(respostaFinal, pedidoOriginalSnapshot);
+                                        if (!missaoAindaAtiva(tokenMissao)) {
+                                            return;
+                                        }
+                                        registrarAtividadeOperacional("CODIGO", "Aplicando alteracao no codigo.");
+                                        aplicarRespostaIA(respostaFinal, pedidoOriginalSnapshot);
                                     } catch (Exception e) {
                                         view.adicionarMensagem("Erro Tatico", "Falha critica ao tentar aplicar codigo substituido: " + e.getMessage());
                                     }
@@ -959,10 +1163,11 @@ public class ChatAiController {
                         Display.getDefault().asyncExec(new Runnable() {
                             public void run() {
                                 try {
-                                	if (!missaoAindaAtiva(tokenMissao)) {
-                                	    return;
-                                	}
-                                	aplicarRespostaIA(respIAFinal, pedidoOriginalSnapshot);
+                                    if (!missaoAindaAtiva(tokenMissao)) {
+                                        return;
+                                    }
+                                    registrarAtividadeOperacional("CODIGO", "Aplicando alteracao no documento.");
+                                    aplicarRespostaIA(respIAFinal, pedidoOriginalSnapshot);
                                 } catch (Exception e) {
                                     view.adicionarMensagem("Erro Tatico", "Falha critica ao tentar aplicar edicao no documento: " + e.getMessage());
                                 }
@@ -971,29 +1176,40 @@ public class ChatAiController {
                         atualizarStatusNaView("Aplicando resposta final");
                     }
 
-                    if (!missaoConcluida) {
-                    	String respostaDeContingencia = tentarConclusaoDeContingencia(
-                    	        instrucaoEnriquecida,
-                    	        ultimaRespostaEstruturadaValida,
-                    	        ultimoNomeFerramenta,
-                    	        ultimoResumoFerramenta,
-                    	        ultimoResultadoFerramentaBruto,
-                    	        selectedCodeSnapshot,
-                    	        fullFileTextSnapshot,
-                    	        apiKeySnapshot,
-                    	        documentSnapshot);
+                    if (!contextoMissao.isMissaoConcluida()) {
+                        String respostaDeContingencia = tentarConclusaoDeContingencia(
+                                contextoMissao.getInstrucaoEnriquecida(),
+                                ultimaRespostaEstruturadaValida,
+                                contextoMissao.getUltimoNomeFerramenta(),
+                                contextoMissao.getUltimoResumoFerramenta(),
+                                contextoMissao.getUltimoResultadoFerramentaBruto(),
+                                selectedCodeSnapshot,
+                                fullFileTextSnapshot,
+                                apiKeySnapshot,
+                                documentSnapshot);
 
                         if (respostaDeContingencia != null && respostaDeContingencia.trim().length() > 0) {
                             view.adicionarMensagemAssincrona("IA", respostaDeContingencia);
                             atualizarStatusNaView("Resposta parcial de contingencia entregue");
+                            registrarAtividadeOperacional("RESPOSTA", "Resposta parcial de contingencia entregue.");
                         } else {
                             view.adicionarMensagemAssincrona("Sistema", "Limite de ciclos atingido. Foi entregue apenas o que ja pode ser confirmado com seguranca.");
                             atualizarStatusNaView("Limite de ciclos atingido");
+                            registrarAtividadeOperacional("LIMITE", "Limite de ciclos atingido.");
                         }
                     }
                 } catch (Exception ex) {
-                    view.adicionarMensagemAssincrona("Sistema", "Falha de comunicacao com a base: " + ex.getMessage());
+                    ex.printStackTrace();
+
+                    String tipoErro = ex.getClass() != null ? ex.getClass().getName() : "ErroDesconhecido";
+                    String mensagemErro = ex.getMessage() != null ? ex.getMessage() : "sem mensagem";
+
+                    view.adicionarMensagemAssincrona(
+                            "Sistema",
+                            "Falha durante execucao da missao: " + tipoErro + " - " + mensagemErro
+                    );
                     atualizarStatusNaView("Falha de comunicacao");
+                    registrarAtividadeOperacional("ERRO", "Falha durante execucao da missao: " + tipoErro + " - " + mensagemErro);
                 } finally {
                     view.alternarCarregamento(false);
                 }
@@ -1003,13 +1219,37 @@ public class ChatAiController {
         missaoThread.setName("Operacao-Autonoma-IA");
         missaoThread.start();
     }
+    private boolean isRespostaDeFalhaTecnicaModelo(AiResponse respostaIA) {
+        if (respostaIA == null) {
+            return false;
+        }
 
-    /**
- * Tenta consolidar uma resposta final parcial quando o limite de ciclos for atingido.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-18
- */
+        String action = respostaIA.getAction() != null ? respostaIA.getAction().toLowerCase() : "";
+        String explanation = respostaIA.getExplanation() != null ? respostaIA.getExplanation().toLowerCase() : "";
+        String content = respostaIA.getContent() != null ? respostaIA.getContent().toLowerCase() : "";
+
+        if (!"responder_ao_usuario".equals(action) && !"perguntar_ao_usuario".equals(action)) {
+            return false;
+        }
+
+        if (explanation.contains("falha tecnica de infraestrutura do provider/modelo")
+                || explanation.contains("falha tecnica do provider/modelo")
+                || explanation.contains("falha de infraestrutura do provider/modelo")
+                || explanation.contains("detectada antes do parse estruturado")
+                || explanation.contains("resposta malformada do modelo")
+                || explanation.contains("falha ao interpretar a resposta estruturada do modelo")) {
+            return true;
+        }
+
+        if (content.contains("falha tecnica do modelo durante a execucao")
+                || content.contains("nao tratei isso como resposta valida da ia")
+                || content.contains("posso tentar novamente ou investigar a causa")) {
+            return true;
+        }
+
+        return false;
+    }
+    /** * Tenta consolidar uma resposta final parcial quando o limite de ciclos for atingido. * * @author Renato Tomaz Nati * @since 2026-05-18 */
     private String tentarConclusaoDeContingencia(String instrucaoEnriquecida, AiResponse ultimaRespostaEstruturadaValida, String ultimoNomeFerramenta, String ultimoResumoFerramenta, String ultimoResultadoFerramentaBruto, String selectedCodeSnapshot, String fullFileTextSnapshot, String apiKeySnapshot, IDocument documentSnapshot) {
         try {
             StringBuilder instrucaoFinalForcada = new StringBuilder();
@@ -1033,27 +1273,37 @@ public class ChatAiController {
             if (ultimoResumoFerramenta != null && ultimoResumoFerramenta.trim().length() > 0) {
                 instrucaoFinalForcada.append("\nResumo do ultimo resultado:\n").append(ultimoResumoFerramenta).append("\n");
             }
-          
+
             String historicoAtual = sessionHistoryService.obter();
             if (historicoAtual != null && historicoAtual.trim().length() > 0) {
                 instrucaoFinalForcada.append("\nHistorico da sessao:\n");
                 instrucaoFinalForcada.append(historicoAtual).append("\n");
             }
 
-            String respostaMcpBruta = SaiLibraryMcpClient.callDesenvolvimentoGpt5(selectedCodeSnapshot, fullFileTextSnapshot, instrucaoFinalForcada.toString(), apiKeySnapshot);
-            String textoMcpExtraido = mcpResponseService.extrairTextoMcp(respostaMcpBruta);
-            AiResponse respostaIA = mcpResponseService.interpretarRespostaIA(textoMcpExtraido);
-            respostaIA = mcpResponseService.normalizarProtocoloFerramentaLegado(respostaIA);
+            registrarAtividadeOperacional("CONTINGENCIA", "Solicitando resposta final de contingencia.");
+            AiResponse respostaIA = agentModelCoordinator.executarMissao(
+                    selectedCodeSnapshot,
+                    fullFileTextSnapshot,
+                    instrucaoFinalForcada.toString(),
+                    apiKeySnapshot
+            );
 
-            if (mcpResponseService.respostaEstruturadaValida(respostaIA)) {
-                if ("responder_ao_usuario".equalsIgnoreCase(respostaIA.getAction()) || "explicar".equalsIgnoreCase(respostaIA.getAction())) {
+            if (respostaIA != null && mcpResponseService.respostaEstruturadaValida(respostaIA)) {
+                if ("responder_ao_usuario".equalsIgnoreCase(respostaIA.getAction())
+                        || "explicar".equalsIgnoreCase(respostaIA.getAction())) {
                     return mcpResponseService.formatarRespostaIA(respostaIA, documentSnapshot);
                 }
             }
         } catch (Exception e) {
+            registrarAtividadeOperacional("ERRO", "Falha ao montar resposta de contingencia: " + e.getMessage());
         }
 
-        return montarRespostaLocalDeContingencia(ultimaRespostaEstruturadaValida, ultimoNomeFerramenta, ultimoResumoFerramenta, ultimoResultadoFerramentaBruto);
+        return montarRespostaLocalDeContingencia(
+                ultimaRespostaEstruturadaValida,
+                ultimoNomeFerramenta,
+                ultimoResumoFerramenta,
+                ultimoResultadoFerramentaBruto
+        );
     }
 
     /**
@@ -1106,81 +1356,235 @@ public class ChatAiController {
     }
 
   
-    /**
- * Aplica a resposta da IA no codigo ou no chat.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-18
- */
+    /** * Aplica a resposta de edicao da IA no documento e usa a validacao real do * workspace como arbitro final. * * <p>Se houver erro de compilacao apos a aplicacao, a alteracao e revertida e * o sistema nao declara sucesso. Em vez disso, informa o erro e pergunta se o * usuario deseja que a causa seja investigada.</p> * * @author Renato Tomaz Nati * @since 2026-05-25 */
     private void aplicarRespostaIA(AiResponse respostaIA, String pedidoOriginal) throws Exception {
-        String acao = respostaIA.getAction();
-        String conteudo = respostaIA.getContent();
-
-        if (acao == null || acao.trim().length() == 0 || conteudo == null) {
-            view.adicionarMensagem("IA", conteudo != null ? conteudo : "Conteudo vazio.");
-            atualizarStatusNaView("Resposta vazia da IA");
+        if (respostaIA == null) {
+            view.adicionarMensagem("Sistema", "Falha operacional: resposta da IA ausente para aplicacao.");
+            atualizarStatusNaView("Resposta ausente para aplicacao");
+            registrarAtividadeOperacional("ERRO", "Resposta da IA ausente para aplicacao.");
             return;
         }
 
-        if ("explicar".equalsIgnoreCase(acao)) {
-            view.adicionarMensagem("IA", mcpResponseService.formatarRespostaIA(respostaIA, document));
-            atualizarStatusNaView("Resposta explicativa entregue");
+        if (document == null || selection == null) {
+            view.adicionarMensagem("Sistema", "Falha operacional: documento ou selecao indisponivel para aplicacao.");
+            atualizarStatusNaView("Documento indisponivel");
+            registrarAtividadeOperacional("ERRO", "Documento ou selecao indisponivel para aplicacao.");
             return;
         }
 
-        boolean modificado = false;
+        String action = respostaIA.getAction();
+        String conteudoNovo = respostaIA.getContent() != null ? respostaIA.getContent() : "";
 
-        if ("substituir".equalsIgnoreCase(acao)) {
-            removerDestaque();
-            document.replace(selection.getOffset(), selection.getLength(), conteudo);
-            modificado = true;
-        } else if ("comentar".equalsIgnoreCase(acao)) {
-            if (comentarioInvalidoParaTrecho(conteudo, selectedCode)) {
-                view.adicionarMensagem("Sistema", "Comentario rejeitado por seguranca. A IA tentou inserir um bloco que replica o metodo ou estrutura demais do trecho original.");
-                view.adicionarMensagem("IA", mcpResponseService.formatarRespostaIA(respostaIA, document));
-                atualizarStatusNaView("Comentario rejeitado");
-                return;
-            }
+        CodeApplicationState estado = codeApplicationService.capturarEstadoAntesDaAplicacao(document, selection);
 
-            removerDestaque();
-            String comentario = montarComentarioBloco(conteudo);
-            document.replace(selection.getOffset(), 0, comentario);
-            modificado = true;
-        } else if ("inserir_abaixo".equalsIgnoreCase(acao)) {
-            removerDestaque();
-            int posicaoInsercao = selection.getOffset() + selection.getLength();
-            document.replace(posicaoInsercao, 0, getLineDelimiter(document) + conteudo);
-            modificado = true;
-        } else if ("anexar_acima".equalsIgnoreCase(acao)) {
-            removerDestaque();
-            document.replace(selection.getOffset(), 0, conteudo + getLineDelimiter(document));
-            modificado = true;
+        registrarAtividadeOperacional("CODIGO", "Aplicando acao [" + action + "] no documento.");
+        codeApplicationService.logAplicacaoDebug(action, estado, conteudoNovo);
+
+        CodeApplicationResult resultadoAplicacao =
+                codeApplicationService.aplicarEdicaoNoDocumento(document, action, conteudoNovo, estado);
+
+        if (!resultadoAplicacao.isAplicou()) {
+            view.adicionarMensagem("Sistema", resultadoAplicacao.getMensagemUsuario());
+            atualizarStatusNaView("Acao nao suportada");
+            registrarAtividadeOperacional("ERRO", resultadoAplicacao.getMensagemTecnica());
+            return;
         }
 
-        if (modificado) {
-            String resumo = "PEDIDO ORIGINAL: " + pedidoOriginal + System.lineSeparator()
-                    + "ACAO EXECUTADA: " + acao + System.lineSeparator()
-                    + "STATUS: Operacao concluida com exito no codigo fonte.";
+        codeApplicationService.sincronizarDocumentoComCompilationUnit(document, compUnit);
+        sincronizarBlocosNomeadosNoEditorAtual();
 
-            if (respostaIA.getExplanation() != null && respostaIA.getExplanation().length() > 0) {
-                resumo += System.lineSeparator() + "NOTAS DA IA: " + respostaIA.getExplanation();
-            }
+        WorkspaceCompilationValidationResult resultadoValidacao =
+                codeWorkspaceValidationService != null
+                        ? codeWorkspaceValidationService.validarEstadoAtual(compUnit)
+                        : null;
 
-            view.adicionarMensagem("Comando Central", resumo);
-            atualizarStatusNaView("Alteracao aplicada com sucesso");
+        if (!workspaceValidationSucceeded(resultadoValidacao)) {
+        	CodeApplicationResult resultadoReversao =
+        	        codeApplicationService.reverterAplicacaoAposFalha(document, compUnit, action, conteudoNovo, estado);
             sincronizarBlocosNomeadosNoEditorAtual();
-        } else {
-            view.adicionarMensagem("IA", mcpResponseService.formatarRespostaIA(respostaIA, document));
-            atualizarStatusNaView("Resposta entregue sem alterar codigo");
+
+            String mensagemValidacao = buildWorkspaceValidationMessage(resultadoValidacao);
+
+            view.adicionarMensagem("Sistema",
+                    "Percebi erros de compilacao no workspace apos a alteracao. A mudanca foi revertida automaticamente.");
+            view.adicionarMensagem("Sistema", mensagemValidacao);
+            view.adicionarMensagem("Sistema", "Quer que eu avalie a causa desses erros agora?");
+            atualizarStatusNaView("Alteracao revertida por erro de compilacao");
+            registrarAtividadeOperacional("VALIDACAO", "Compilacao com erro apos alteracao. Mudanca revertida automaticamente.");
+            System.out.println("[CHAT APPLY DEBUG] Alteracao revertida por falha de compilacao.");
+            System.out.println("[CHAT APPLY DEBUG] reversao.mensagem=" + resultadoReversao.getMensagemTecnica());
+            return;
+        }
+
+        view.adicionarMensagem("IA", mcpResponseService.formatarRespostaIA(respostaIA, document));
+        atualizarStatusNaView("Alteracao aplicada com sucesso");
+        registrarAtividadeOperacional("VALIDACAO", "Workspace validado com sucesso apos aplicacao.");
+        System.out.println("[CHAT APPLY DEBUG] Alteracao aplicada com sucesso e workspace validado.");
+    }
+    private MissionExecutionContext criarMissionExecutionContext( String instrucao, String pedidoOriginal, long tokenMissao, InvestigationCoveragePolicy.CoveragePlan coveragePlan, File raizProjeto, int offsetAtual) {
+
+        MissionExecutionContext contexto = new MissionExecutionContext();
+        contexto.setTokenMissao(tokenMissao);
+        contexto.setInstrucaoSnapshot(instrucao);
+        contexto.setPedidoOriginalSnapshot(pedidoOriginal);
+        contexto.setSelectedCodeSnapshot(this.selectedCode != null ? this.selectedCode : "");
+        contexto.setFullFileTextSnapshot(this.fullFileText != null ? this.fullFileText : "");
+        contexto.setApiKeySnapshot(this.apiKey);
+        contexto.setDocumentSnapshot(this.document);
+        contexto.setSelectionSnapshot(this.selection);
+        contexto.setCompUnitSnapshot(this.compUnit);
+        contexto.setCoveragePlan(coveragePlan);
+        contexto.setRaizProjeto(raizProjeto);
+        contexto.setOffsetAtual(offsetAtual);
+        return contexto;
+    }
+    
+    private void sincronizarBlocosNomeadosNoEditorAtual() {
+        try {
+            if (document != null && textEditor != null && compUnit != null
+                    && compUnit.getResource() != null
+                    && compUnit.getResource().getLocation() != null) {
+
+                String currentFilePath = compUnit.getResource().getLocation().toFile().getAbsolutePath().replace("\\", "/");
+
+                namedBlockDocumentBindingService.bindBlocksToDocument(document, namedBlockSessionService.getAll(), currentFilePath);
+                namedBlockDocumentBindingService.syncBlocksFromDocument(document, namedBlockSessionService.getAll(), currentFilePath);
+                namedBlockHighlighter.refreshHighlights(textEditor, namedBlockSessionService.getAll(), currentFilePath);
+            }
+        } catch (Exception e) {
+            // Falha silenciosa segura para nao interromper fluxo principal de edicao
         }
     }
+    
+    /** * Identifica se a pergunta ao usuario foi gerada por falha tecnica da auditoria, * e nao por uma duvida funcional normal do fluxo. * * @param respostaIA resposta estruturada atual * @return true quando a pergunta estiver relacionada a indisponibilidade tecnica da auditoria * * @author Renato Tomaz Nati * @since 2026-05-25 */
+    private boolean isPerguntaDeFalhaTecnicaAuditoria(AiResponse respostaIA) {
+        if (respostaIA == null) {
+            return false;
+        }
 
-    /**
- * Bloqueia comentarios que tentem duplicar o metodo inteiro.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-18
- */
+        String question = respostaIA.getQuestion() != null ? respostaIA.getQuestion().toLowerCase() : "";
+        String explanation = respostaIA.getExplanation() != null ? respostaIA.getExplanation().toLowerCase() : "";
+
+        if (question.contains("auditoria final")
+                || question.contains("seguir sem auditoria")
+                || question.contains("validar pelo workspace eclipse")
+                || question.contains("auditoria indisponivel")
+                || question.contains("auditoria inconclusiva")) {
+            return true;
+        }
+
+        if (explanation.contains("auditoria final indisponivel")
+                || explanation.contains("confirmacao do usuario requerida antes de aplicar")
+                || explanation.contains("falha tecnica da auditoria")
+                || explanation.contains("seguir sem auditoria final")) {
+            return true;
+        }
+
+        return false;
+    }
+    /** * Verifica o resultado de validacao do workspace sem depender de um getter * especifico da classe de retorno. * * @author Renato Tomaz Nati * @since 2026-05-25 */
+    private boolean workspaceValidationSucceeded(WorkspaceCompilationValidationResult resultadoValidacao) {
+        if (resultadoValidacao == null) {
+            return true;
+        }
+
+        Boolean valor = invokeBooleanGetterIfExists(
+                resultadoValidacao,
+                "isSucesso",
+                "isValido",
+                "isCompilouSemErros",
+                "isSemErros",
+                "isSuccess"
+        );
+
+        if (valor != null) {
+            return valor.booleanValue();
+        }
+
+        String texto = resultadoValidacao.toString() != null ? resultadoValidacao.toString().toLowerCase() : "";
+        if (texto.contains("erro") || texto.contains("error") || texto.contains("falha") || texto.contains("failure")) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /** * Monta mensagem amigavel da validacao do workspace sem depender de um getter * especifico. * * @author Renato Tomaz Nati * @since 2026-05-25 */
+    private String buildWorkspaceValidationMessage(WorkspaceCompilationValidationResult resultadoValidacao) {
+        if (resultadoValidacao == null) {
+            return "Nao foi possivel obter detalhes da validacao do workspace.";
+        }
+
+        String valor = invokeStringGetterIfExists(
+                resultadoValidacao,
+                "getMensagemUsuario",
+                "getMensagem",
+                "getResumoErros",
+                "getSummary",
+                "getDescription"
+        );
+
+        if (valor != null && valor.trim().length() > 0) {
+            return valor;
+        }
+
+        return resultadoValidacao.toString();
+    }
+
+    private Boolean invokeBooleanGetterIfExists(Object alvo, String... nomesMetodos) {
+        if (alvo == null || nomesMetodos == null) {
+            return null;
+        }
+
+        for (int i = 0; i < nomesMetodos.length; i++) {
+            try {
+                java.lang.reflect.Method method = alvo.getClass().getMethod(nomesMetodos[i]);
+                Object retorno = method.invoke(alvo);
+                if (retorno instanceof Boolean) {
+                    return (Boolean) retorno;
+                }
+            } catch (Exception e) {
+            }
+        }
+
+        return null;
+    }
+
+    private String invokeStringGetterIfExists(Object alvo, String... nomesMetodos) {
+        if (alvo == null || nomesMetodos == null) {
+            return null;
+        }
+
+        for (int i = 0; i < nomesMetodos.length; i++) {
+            try {
+                java.lang.reflect.Method method = alvo.getClass().getMethod(nomesMetodos[i]);
+                Object retorno = method.invoke(alvo);
+                if (retorno instanceof String) {
+                    return (String) retorno;
+                }
+            } catch (Exception e) {
+            }
+        }
+
+        return null;
+    }
+
+    private int calcularComprimentoAplicado(String action, String conteudoNovo, int comprimentoOriginal) {
+        if ("substituir".equalsIgnoreCase(action) || "comentar".equalsIgnoreCase(action)) {
+            return conteudoNovo != null ? conteudoNovo.length() : 0;
+        }
+
+        if ("inserir_abaixo".equalsIgnoreCase(action)) {
+            return (conteudoNovo != null ? conteudoNovo.length() : 0) + System.lineSeparator().length();
+        }
+
+        if ("anexar_acima".equalsIgnoreCase(action)) {
+            return (conteudoNovo != null ? conteudoNovo.length() : 0) + System.lineSeparator().length();
+        }
+
+        return comprimentoOriginal;
+    }
+    /** * Bloqueia comentarios que tentem duplicar o metodo inteiro ou que tragam * estrutura de codigo no lugar de comentario explicativo. * * @param conteudoComentario conteudo retornado pela IA * @param trechoSelecionado trecho original selecionado * @return true quando o comentario for inseguro ou inadequado * * @author Renato Tomaz Nati * @since 2026-05-18 */
     private boolean comentarioInvalidoParaTrecho(String conteudoComentario, String trechoSelecionado) {
         if (conteudoComentario == null || conteudoComentario.trim().length() == 0) {
             return true;
@@ -1219,130 +1623,138 @@ public class ChatAiController {
 
         return false;
     }
-    private void sincronizarBlocosNomeadosNoEditorAtual() {
-        try {
-            if (document != null && textEditor != null && compUnit != null
-                    && compUnit.getResource() != null
-                    && compUnit.getResource().getLocation() != null) {
-
-                String currentFilePath = compUnit.getResource().getLocation().toFile().getAbsolutePath().replace("\\", "/");
-
-                namedBlockDocumentBindingService.bindBlocksToDocument(document, namedBlockSessionService.getAll(), currentFilePath);
-                namedBlockDocumentBindingService.syncBlocksFromDocument(document, namedBlockSessionService.getAll(), currentFilePath);
-                namedBlockHighlighter.refreshHighlights(textEditor, namedBlockSessionService.getAll(), currentFilePath);
-            }
-        } catch (Exception e) {
-            // Falha silenciosa segura para nao interromper fluxo principal de edicao
-        }
-    }
   /**
  * Monta a instrucao enriquecida usada pela IA.
  *
  * @author Renato Tomaz Nati
  * @since 2026-05-18
  */
-    private String construirInstrucaoFinal(String instrucao, ICompilationUnit unidade, ITextSelection selecao, int profundidadeMaxima) {
-    	StringBuilder instrucaoFinal = new StringBuilder();
-    	if (instrucao != null) {
-    		instrucaoFinal.append("INSTRUCAO ATUAL: ").append(instrucao);
-    	}
-    	instrucaoFinal.append("\n\n");
-    	NamedCodeBlock blocoPrincipalAtivo = resolverBlocoPrincipalAtivo();
-    	if (blocoPrincipalAtivo != null) {
-    	    instrucaoFinal.append("ALVO PRINCIPAL: ")
-    	            .append(blocoPrincipalAtivo.getName())
-    	            .append(" | arquivo=")
-    	            .append(blocoPrincipalAtivo.getFileName())
-    	            .append(" | linhas=")
-    	            .append(blocoPrincipalAtivo.getStartLine())
-    	            .append("-")
-    	            .append(blocoPrincipalAtivo.getEndLine())
-    	            .append("\n");
-    	    instrucaoFinal.append("REGRA: Se existir bloco PRIMARY ativo, ele e o sujeito principal da analise e da alteracao atual. ");
-    	    instrucaoFinal.append("A selecao atual do editor continua relevante como contexto auxiliar, salvo se o usuario mandar explicitamente usar outro alvo.\n\n");
-    	}
-    	
-    	String historicoAtual = sessionHistoryService.obter();
-            if (historicoAtual != null && historicoAtual.trim().length() > 0) {
-                instrucaoFinal.append("=== HISTORICO DESTA SESSAO (MEMORIA RECENTE) ===\n");
-                instrucaoFinal.append(historicoAtual);
-                instrucaoFinal.append("\n================================================\n\n");
+    private String construirInstrucaoFinal(String instrucao, ICompilationUnit unidade, ITextSelection selecao, int profundidadeMaxima, InvestigationCoveragePolicy.CoveragePlan coveragePlan) {
+        StringBuilder instrucaoFinal = new StringBuilder();
+        if (instrucao != null) {
+            instrucaoFinal.append("INSTRUCAO ATUAL: ").append(instrucao);
+        }
+        instrucaoFinal.append("\n\n");
+
+        String perfilRaciocinioAtual = view != null ? view.getPerfilRaciocinioConfigurado() : ChatRuntimeSettings.PERFIL_PADRAO;
+        String perfilRaciocinioNormalizado = complexityProfilePolicy != null
+                ? complexityProfilePolicy.normalizarPerfil(perfilRaciocinioAtual)
+                : ChatRuntimeSettings.PERFIL_PADRAO;
+
+        int profundidadeEfetiva = profundidadeMaxima;
+        if (ChatRuntimeSettings.PERFIL_ULTRA.equals(perfilRaciocinioNormalizado) && profundidadeEfetiva < 4) {
+            profundidadeEfetiva = 4;
+        } else if (ChatRuntimeSettings.PERFIL_COMPLEXO.equals(perfilRaciocinioNormalizado) && profundidadeEfetiva < 3) {
+            profundidadeEfetiva = 3;
+        } else if (profundidadeEfetiva < 2) {
+            profundidadeEfetiva = 2;
+        }
+
+        NamedCodeBlock blocoPrincipalAtivo = resolverBlocoPrincipalAtivo();
+        if (blocoPrincipalAtivo != null) {
+            instrucaoFinal.append("ALVO PRINCIPAL: ")
+                    .append(blocoPrincipalAtivo.getName())
+                    .append(" | arquivo=")
+                    .append(blocoPrincipalAtivo.getFileName())
+                    .append(" | linhas=")
+                    .append(blocoPrincipalAtivo.getStartLine())
+                    .append("-")
+                    .append(blocoPrincipalAtivo.getEndLine())
+                    .append("\n");
+            instrucaoFinal.append("REGRA: Se existir bloco PRIMARY ativo, ele e o sujeito principal da analise e tambem pode ser alterado quando a tarefa exigir mutacao. ");
+            instrucaoFinal.append("A selecao atual do editor continua relevante como contexto auxiliar, salvo se o usuario mandar explicitamente usar outro alvo. ");
+            instrucaoFinal.append("Blocos REFERENCE continuam somente leitura.\n\n");
+        }
+
+        String historicoAtual = sessionHistoryService.obter();
+        if (historicoAtual != null && historicoAtual.trim().length() > 0) {
+            instrucaoFinal.append("=== HISTORICO DESTA SESSAO (MEMORIA RECENTE) ===\n");
+            instrucaoFinal.append(historicoAtual);
+            instrucaoFinal.append("\n================================================\n\n");
+        }
+
+        if (complexityProfilePolicy != null) {
+            instrucaoFinal.append(complexityProfilePolicy.buildProfileDirective(perfilRaciocinioNormalizado, instrucao)).append("\n\n");
+        }
+
+        if (investigationCoveragePolicy != null && coveragePlan != null) {
+            instrucaoFinal.append(investigationCoveragePolicy.buildPromptDirective(coveragePlan)).append("\n\n");
+        }
+
+        instrucaoFinal.append("Responda somente em JSON valido com os campos action, content e explanation.\n");
+        instrucaoFinal.append("Valores aceitos para action: executar_ferramenta, responder_ao_usuario, perguntar_ao_usuario, substituir, comentar, explicar, inserir_abaixo, anexar_acima.\n");
+        instrucaoFinal.append("Nao escreva texto fora do JSON.\n");
+        instrucaoFinal.append("Regras operacionais de ferramenta:\n");
+        instrucaoFinal.append("1. Sempre use path relativo a raiz segura do projeto.\n");
+        instrucaoFinal.append("2. Nunca use caminho absoluto.\n");
+        instrucaoFinal.append("3. Se houver duvida sobre a base do projeto, use verificar_raiz_projeto antes de explorar ou buscar texto.\n");
+        instrucaoFinal.append("4. Se uma ferramenta devolver uma raiz segura, reutilize essa base nas proximas buscas.\n");
+        instrucaoFinal.append("5. Nao repita a mesma ferramenta com os mesmos parametros se o resultado anterior ja trouxe a resposta.\n");
+        instrucaoFinal.append("6. Sempre aproveite os nomes de arquivos, classes e pacotes devolvidos pelas ferramentas.\n");
+        instrucaoFinal.append("7. Se o usuario pedir alteracao de arquivo preexistente que esteja apenas dentro de um package ou pasta marcada como editavel, mas esse arquivo nao estiver explicitamente marcado como editavel, bloqueie a alteracao direta.\n");
+        instrucaoFinal.append("8. Nessa situacao, explique de forma curta e objetiva que o package ou pasta editavel autoriza criacao, mas nao autoriza alterar arquivos preexistentes nao marcados.\n");
+        instrucaoFinal.append("9. Nessa mesma situacao, ofereca caminho seguro: marcar o arquivo explicitamente como editavel ou criar novo arquivo dentro do package ou pasta editavel.\n");
+        instrucaoFinal.append("10. Se o arquivo preexistente tambem estiver explicitamente marcado como editavel, a alteracao pode prosseguir, respeitando backup obrigatorio quando a politica exigir.\n");
+        instrucaoFinal.append("11. Antes de propor criacao, alteracao ou exclusao em contexto estrutural, prefira consultar a politica real com a ferramenta consultar_politica_mutacao_contexto quando houver qualquer duvida.\n");
+
+        if (profundidadeEfetiva > 0 && unidade != null && selecao != null) {
+            instrucaoFinal.append("Prompt fundamental deve ser seguido mesmo sem breadcrumb.\n");
+
+            final ICompilationUnit unidadeFinal = unidade;
+            final ITextSelection selecaoFinal = selecao;
+            final int profundidadeFinal = profundidadeEfetiva;
+            final String[] breadcrumbHolder = new String[1];
+
+            Thread worker = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        breadcrumbHolder[0] = contextOrchestrator.enraizarChamadas(unidadeFinal, selecaoFinal.getOffset(), profundidadeFinal);
+                    } catch (Exception e) {
+                        breadcrumbHolder[0] = null;
+                    }
+                }
+            });
+            worker.setName("Breadcrumb-Timebox");
+            worker.setDaemon(true);
+            worker.start();
+
+            try {
+                worker.join(1500L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
-    	
 
-    	instrucaoFinal.append("\n\n");
-    	instrucaoFinal.append("Responda somente em JSON valido com os campos action, content e explanation.\n");
-    	instrucaoFinal.append("Valores aceitos para action: executar_ferramenta, responder_ao_usuario, perguntar_ao_usuario, substituir, comentar, explicar, inserir_abaixo, anexar_acima.\n");
-    	instrucaoFinal.append("Nao escreva texto fora do JSON.\n");
-    	instrucaoFinal.append("Regras operacionais de ferramenta:\n");
-    	instrucaoFinal.append("1. Sempre use path relativo a raiz segura do projeto.\n");
-    	instrucaoFinal.append("2. Nunca use caminho absoluto.\n");
-    	instrucaoFinal.append("3. Se houver duvida sobre a base do projeto, use verificar_raiz_projeto antes de explorar ou buscar texto.\n");
-    	instrucaoFinal.append("4. Se uma ferramenta devolver uma raiz segura, reutilize essa base nas proximas buscas.\n");
-    	instrucaoFinal.append("5. Nao repita a mesma ferramenta com os mesmos parametros se o resultado anterior ja trouxe a resposta.\n");
-    	instrucaoFinal.append("6. Sempre aproveite os nomes de arquivos, classes e pacotes devolvidos pelas ferramentas.\n");
-    	instrucaoFinal.append("7. Se o usuario pedir alteracao de arquivo preexistente que esteja apenas dentro de um package ou pasta marcada como editavel, mas esse arquivo nao estiver explicitamente marcado como editavel, bloqueie a alteracao direta.\n");
-    	instrucaoFinal.append("8. Nessa situacao, explique de forma curta e objetiva que o package ou pasta editavel autoriza criacao, mas nao autoriza alterar arquivos preexistentes nao marcados.\n");
-    	instrucaoFinal.append("9. Nessa mesma situacao, ofereca caminho seguro: marcar o arquivo explicitamente como editavel ou criar novo arquivo dentro do package ou pasta editavel.\n");
-    	instrucaoFinal.append("10. Se o arquivo preexistente tambem estiver explicitamente marcado como editavel, a alteracao pode prosseguir, respeitando backup obrigatorio quando a politica exigir.\n");
-    	instrucaoFinal.append("11. Antes de propor criacao, alteracao ou exclusao em contexto estrutural, prefira consultar a politica real com a ferramenta consultar_politica_mutacao_contexto quando houver qualquer duvida.\n");
+            if (worker.isAlive()) {
+                worker.interrupt();
+            }
 
-    	if (profundidadeMaxima > 0 && unidade != null && selecao != null) {
-    		instrucaoFinal.append("Prompt fundamental deve ser seguido mesmo sem breadcrumb.\n");
+            String breadcrumb = breadcrumbHolder[0];
+            if (breadcrumb != null && breadcrumb.length() > 0) {
+                instrucaoFinal.append("\n// REFERENCIA OBRIGATORIA: OS METODOS ABAIXO FAZEM PARTE DO FLUXO DE EXECUCAO E COMPOEM O CONTEXTO DO PROJETO:\n");
+                instrucaoFinal.append(breadcrumb);
+            } else {
+                instrucaoFinal.append("\n// Observacao: breadcrumb indisponivel por limite de tempo ou falha isolada.\n");
+            }
+        }
 
-    		final ICompilationUnit unidadeFinal = unidade;
-    		final ITextSelection selecaoFinal = selecao;
-    		final int profundidadeFinal = profundidadeMaxima;
-    		final String[] breadcrumbHolder = new String[1];
+        String contextoBlocos = namedBlockPromptFormatter.format(namedBlockSessionService.getAll());
+        if (contextoBlocos != null && contextoBlocos.trim().length() > 0) {
+            instrucaoFinal.append("\n\n");
+            instrucaoFinal.append(contextoBlocos);
+            instrucaoFinal.append("\n");
+            instrucaoFinal.append("Se o usuario mencionar nomes de blocos, trate esses nomes como referencias exatas aos trechos nomeados.\n");
+        }
 
-    		Thread worker = new Thread(new Runnable() {
-    			@Override
-    			public void run() {
-    				try {
-    					breadcrumbHolder[0] = contextOrchestrator.enraizarChamadas(unidadeFinal, selecaoFinal.getOffset(), profundidadeFinal);
-    				} catch (Exception e) {
-    					breadcrumbHolder[0] = null;
-    				}
-    			}
-    		});
-    		worker.setName("Breadcrumb-Timebox");
-    		worker.setDaemon(true);
-    		worker.start();
+        String contextoEstrutural = namedStructuralContextPromptFormatter.format(namedStructuralContextSessionService.getAll());
+        if (contextoEstrutural != null && contextoEstrutural.trim().length() > 0) {
+            instrucaoFinal.append("\n\n");
+            instrucaoFinal.append(contextoEstrutural);
+            instrucaoFinal.append("\n");
+            instrucaoFinal.append("Se o usuario mencionar nomes de arquivos, packages ou pastas estruturais, trate esses nomes como referencias exatas aos contextos estruturais nomeados.\n");
+        }
 
-    		try {
-    			worker.join(1500L);
-    		} catch (InterruptedException e) {
-    			Thread.currentThread().interrupt();
-    		}
-
-    		if (worker.isAlive()) {
-    			worker.interrupt();
-    		}
-
-    		String breadcrumb = breadcrumbHolder[0];
-    		if (breadcrumb != null && breadcrumb.length() > 0) {
-    			instrucaoFinal.append("\n// REFERENCIA OBRIGATORIA: OS METODOS ABAIXO FAZEM PARTE DO FLUXO DE EXECUCAO E COMPOEM O CONTEXTO DO PROJETO:\n");
-    			instrucaoFinal.append(breadcrumb);
-    		} else {
-    			instrucaoFinal.append("\n// Observacao: breadcrumb indisponivel por limite de tempo ou falha isolada.\n");
-    		}
-    	}
-    	String contextoBlocos = namedBlockPromptFormatter.format(namedBlockSessionService.getAll());
-    	if (contextoBlocos != null && contextoBlocos.trim().length() > 0) {
-    	    instrucaoFinal.append("\n\n");
-    	    instrucaoFinal.append(contextoBlocos);
-    	    instrucaoFinal.append("\n");
-    	    instrucaoFinal.append("Se o usuario mencionar nomes de blocos, trate esses nomes como referencias exatas aos trechos nomeados.\n");
-    	}
-
-    	String contextoEstrutural = namedStructuralContextPromptFormatter.format(namedStructuralContextSessionService.getAll());
-    	if (contextoEstrutural != null && contextoEstrutural.trim().length() > 0) {
-    	    instrucaoFinal.append("\n\n");
-    	    instrucaoFinal.append(contextoEstrutural);
-    	    instrucaoFinal.append("\n");
-    	    instrucaoFinal.append("Se o usuario mencionar nomes de arquivos, packages ou pastas estruturais, trate esses nomes como referencias exatas aos contextos estruturais nomeados.\n");
-    	}
-    	return instrucaoFinal.toString();
+        return instrucaoFinal.toString();
     }
 
  
@@ -1594,5 +2006,130 @@ public class ChatAiController {
             }
         });
     }
- 
+    /** * Caller: executarMissaoIA, setContext, sincronizarAlvoPrimarioGlobal e demais fluxos de controle * Callee: ChatView.registrarAtividadeAgente * Objetivo: Registrar uma linha de atividade operacional para que o usuario * acompanhe o que o agente esta fazendo sem depender apenas da barra de progresso. * Data modificacao: 2026-05-24 00:00 * * @param fase fase logica da operacao * @param detalhe detalhe objetivo da atividade * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private void registrarAtividadeOperacional(String fase, String detalhe) {
+        if (view == null) {
+            return;
+        }
+
+        view.registrarAtividadeAgente(fase, detalhe);
+    }
+    /** * Caller: executarMissaoIA * Callee: N/A * Objetivo: Reconfigurar o coordenador de modelos com base na configuracao atual da view. * Feature: Garante que o modo monomodelo ou multimodelo seja aplicado em runtime antes da missao. * Data modificacao: 2026-05-24 00:00 * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    /** * Caller: executarMissaoIA * Callee: SingleModelCoordinator, MultiModelCoordinator * Objetivo: Reconfigurar o coordenador de modelos com base na configuracao * atual da view antes de cada missao. * Feature: Garante que mudancas de modo na aba de configuracao sejam aplicadas * imediatamente, sem depender do tipo anterior do objeto em memoria. * Data modificacao: 2026-05-24 00:00 * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private void reconfigurarCoordenadorModelosAtual() {
+        if (view == null) {
+            agentModelCoordinator = new SingleModelCoordinator();
+            return;
+        }
+
+        String modoExecucao = view.getModoExecucaoConfigurado();
+
+        if (ChatRuntimeSettings.MODO_EXECUCAO_MULTI.equals(modoExecucao)) {
+            agentModelCoordinator = new MultiModelCoordinator();
+            return;
+        }
+
+        agentModelCoordinator = new SingleModelCoordinator();
+    }
+    private boolean validarPreCondicoesAplicacao(AiResponse respostaIA) {
+        if (respostaIA == null) {
+            view.adicionarMensagem("Sistema", "Falha operacional: resposta da IA ausente para aplicacao.");
+            atualizarStatusNaView("Resposta ausente para aplicacao");
+            registrarAtividadeOperacional("ERRO", "Resposta da IA ausente para aplicacao.");
+            return false;
+        }
+
+        if (document == null || selection == null) {
+            view.adicionarMensagem("Sistema", "Falha operacional: documento ou selecao indisponivel para aplicacao.");
+            atualizarStatusNaView("Documento indisponivel");
+            registrarAtividadeOperacional("ERRO", "Documento ou selecao indisponivel para aplicacao.");
+            return false;
+        }
+
+        return true;
+    }
+    private EstadoAplicacaoCodigo capturarEstadoAntesDaAplicacao(String action, String conteudoNovo) throws Exception {
+        EstadoAplicacaoCodigo estado = new EstadoAplicacaoCodigo();
+
+        int offsetInicial = selection.getOffset();
+        int comprimentoOriginal = selection.getLength();
+        String conteudoAnterior = document.get(offsetInicial, comprimentoOriginal);
+
+        estado.setOffsetInicial(offsetInicial);
+        estado.setComprimentoOriginal(comprimentoOriginal);
+        estado.setConteudoAnterior(conteudoAnterior);
+
+        return estado;
+    }
+    private void logAplicacaoDebug(String action, EstadoAplicacaoCodigo estado, String conteudoNovo) {
+        System.out.println("[CHAT APPLY DEBUG] action=" + action);
+        System.out.println("[CHAT APPLY DEBUG] offsetInicial=" + estado.getOffsetInicial());
+        System.out.println("[CHAT APPLY DEBUG] comprimentoOriginal=" + estado.getComprimentoOriginal());
+        System.out.println("[CHAT APPLY DEBUG] conteudoNovoLength=" + (conteudoNovo != null ? conteudoNovo.length() : 0));
+    }
+    private boolean aplicarEdicaoNoDocumento(String action, String conteudoNovo, EstadoAplicacaoCodigo estado) throws Exception {
+        if ("substituir".equalsIgnoreCase(action)) {
+            document.replace(
+                    estado.getOffsetInicial(),
+                    estado.getComprimentoOriginal(),
+                    conteudoNovo
+            );
+            return true;
+        }
+
+        if ("inserir_abaixo".equalsIgnoreCase(action)) {
+            int offsetFinal = estado.getOffsetInicial() + estado.getComprimentoOriginal();
+            document.replace(offsetFinal, 0, System.lineSeparator() + conteudoNovo);
+            return true;
+        }
+
+        if ("anexar_acima".equalsIgnoreCase(action)) {
+            document.replace(estado.getOffsetInicial(), 0, conteudoNovo + System.lineSeparator());
+            return true;
+        }
+
+        if ("comentar".equalsIgnoreCase(action)) {
+            document.replace(
+                    estado.getOffsetInicial(),
+                    estado.getComprimentoOriginal(),
+                    conteudoNovo
+            );
+            return true;
+        }
+
+        view.adicionarMensagem("Sistema", "Acao de edicao nao suportada para aplicacao: " + action);
+        atualizarStatusNaView("Acao nao suportada");
+        registrarAtividadeOperacional("ERRO", "Acao de edicao nao suportada para aplicacao: " + action);
+        return false;
+    }
+  
+    private static class EstadoAplicacaoCodigo {
+        private int offsetInicial;
+        private int comprimentoOriginal;
+        private String conteudoAnterior;
+
+        public int getOffsetInicial() {
+            return offsetInicial;
+        }
+
+        public void setOffsetInicial(int offsetInicial) {
+            this.offsetInicial = offsetInicial;
+        }
+
+        public int getComprimentoOriginal() {
+            return comprimentoOriginal;
+        }
+
+        public void setComprimentoOriginal(int comprimentoOriginal) {
+            this.comprimentoOriginal = comprimentoOriginal;
+        }
+
+        public String getConteudoAnterior() {
+            return conteudoAnterior;
+        }
+
+        public void setConteudoAnterior(String conteudoAnterior) {
+            this.conteudoAnterior = conteudoAnterior;
+        }
+    }
 }

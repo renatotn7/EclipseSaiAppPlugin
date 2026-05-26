@@ -1,5 +1,7 @@
 com.mcp:com.mcp.sailibrary.plugin:eclipse-plugin:lib/gson-2.14.0.jar @ /home/rtnati/git/EclipseSaiAppPlugin/com.mcp.sailibrary/src/com.mcp.sailibrary.plugin/target/com.mcp.sailibrary.plugin-1.0.0-SNAPSHOT.jar
 com.mcp:com.mcp.sailibrary.plugin:eclipse-plugin:lib/org.eclipse.jgit-7.4.jar @ /home/rtnati/git/EclipseSaiAppPlugin/com.mcp.sailibrary/src/com.mcp.sailibrary.plugin/target/com.mcp.sailibrary.plugin-1.0.0-SNAPSHOT.jar
+com.mcp:com.mcp.sailibrary.plugin:eclipse-plugin:lib/slf4j-api-2.0.17.jar @ /home/rtnati/git/EclipseSaiAppPlugin/com.mcp.sailibrary/src/com.mcp.sailibrary.plugin/target/com.mcp.sailibrary.plugin-1.0.0-SNAPSHOT.jar
+com.mcp:com.mcp.sailibrary.plugin:eclipse-plugin:lib/slf4j-simple-2.0.17.jar @ /home/rtnati/git/EclipseSaiAppPlugin/com.mcp.sailibrary/src/com.mcp.sailibrary.plugin/target/com.mcp.sailibrary.plugin-1.0.0-SNAPSHOT.jar
 com.mcp:com.mcp.sailibrary.plugin:eclipse-plugin:lib/vineflower-1.12.0.jar @ /home/rtnati/git/EclipseSaiAppPlugin/com.mcp.sailibrary/src/com.mcp.sailibrary.plugin/target/com.mcp.sailibrary.plugin-1.0.0-SNAPSHOT.jar
 p2.eclipse.plugin:com.sun.jna:eclipse-plugin @ /home/rtnati/.m2/repository/p2/osgi/bundle/com.sun.jna/5.18.1.v20251001-0800/com.sun.jna-5.18.1.v20251001-0800.jar
 p2.eclipse.plugin:org.apache.batik.constants:eclipse-plugin @ /home/rtnati/.m2/repository/p2/osgi/bundle/org.apache.batik.constants/1.19.0.v20250506-1400/org.apache.batik.constants-1.19.0.v20250506-1400.jar

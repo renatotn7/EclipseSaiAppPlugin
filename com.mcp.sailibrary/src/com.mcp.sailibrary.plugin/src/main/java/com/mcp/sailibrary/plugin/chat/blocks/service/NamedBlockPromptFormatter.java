@@ -14,40 +14,90 @@ public class NamedBlockPromptFormatter {
     private static final int MAX_BLOCKS_PER_KIND = 8;
     private static final int MAX_PREVIEW_LENGTH = 160;
 
+    /** * Caller: ChatAiController.construirInstrucaoFinal * Callee: N/A * Objetivo: Montar o contexto textual nomeado da sessao para a IA. * Feature: Bloco PRIMARY passa a ser tratado como alvo principal e tambem como * alvo mutavel. Bloco EDITABLE continua mutavel. Bloco REFERENCE continua * somente leitura. * Data modificacao: 2026-05-24 00:00 * * @param blocks blocos textuais nomeados da sessao * @return texto formatado para o prompt * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public String format(List<NamedCodeBlock> blocks) {
         if (blocks == null || blocks.isEmpty()) {
             return "";
         }
 
-        List<NamedCodeBlock> validBlocks = filterValidBlocks(blocks);
-        if (validBlocks.isEmpty()) {
-            return "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== CONTEXTO TEXTUAL NOMEADO DA SESSAO ===").append("\n");
+        sb.append("FOCO_PRINCIPAL_TEXTUAL:").append("\n");
+
+        boolean encontrouPrimary = false;
+        for (int i = 0; i < blocks.size(); i++) {
+            NamedCodeBlock block = blocks.get(i);
+            if (block == null || block.getKind() == null) {
+                continue;
+            }
+
+            if (block.getKind().name().equals("PRIMARY")) {
+                encontrouPrimary = true;
+                sb.append("- ").append(block.getName())
+                  .append(" -> arquivo=").append(block.getFileName())
+                  .append(" | linhas=").append(block.getStartLine()).append("-").append(block.getEndLine())
+                  .append(" | papel=PRIMARY")
+                  .append(" | mutavel=true")
+                  .append("\n");
+            }
         }
 
-        sortBlocks(validBlocks);
+        if (!encontrouPrimary) {
+            sb.append("- nenhum").append("\n");
+        }
 
-        StringBuilder sb = new StringBuilder();
-        sb.append("=== BLOCOS NOMEADOS DA SESSAO ===\n");
+        sb.append("BLOCOS_EDITAVEIS:").append("\n");
+        boolean encontrouEditable = false;
+        for (int i = 0; i < blocks.size(); i++) {
+            NamedCodeBlock block = blocks.get(i);
+            if (block == null || block.getKind() == null) {
+                continue;
+            }
 
-        sb.append("FOCO_PRINCIPAL_DA_ANALISE:\n");
-        appendKind(sb, validBlocks, NamedBlockKind.PRIMARY);
+            if (block.getKind().name().equals("EDITABLE")) {
+                encontrouEditable = true;
+                sb.append("- ").append(block.getName())
+                  .append(" -> arquivo=").append(block.getFileName())
+                  .append(" | linhas=").append(block.getStartLine()).append("-").append(block.getEndLine())
+                  .append(" | papel=EDITABLE")
+                  .append(" | mutavel=true")
+                  .append("\n");
+            }
+        }
 
-        sb.append("BLOCOS_EDITAVEIS:\n");
-        appendKind(sb, validBlocks, NamedBlockKind.EDITABLE);
+        if (!encontrouEditable) {
+            sb.append("- nenhum").append("\n");
+        }
 
-        sb.append("BLOCOS_REFERENCIA:\n");
-        appendKind(sb, validBlocks, NamedBlockKind.REFERENCE);
+        sb.append("BLOCOS_REFERENCIAIS:").append("\n");
+        boolean encontrouReference = false;
+        for (int i = 0; i < blocks.size(); i++) {
+            NamedCodeBlock block = blocks.get(i);
+            if (block == null || block.getKind() == null) {
+                continue;
+            }
 
-        sb.append("REGRAS:\n");
-        sb.append("1. O bloco PRIMARY e o sujeito central da analise e da alteracao atual.\n");
-        sb.append("2. Quando existir bloco PRIMARY ativo, trate esse bloco como alvo principal da operacao.\n");
-        sb.append("3. Quando o usuario mencionar um nome de bloco, trate esse nome como referencia exata ao trecho correspondente.\n");
-        sb.append("4. BLOCOS_REFERENCIA existem apenas para consulta, comparacao e alinhamento semantico.\n");
-        sb.append("5. BLOCOS_EDITAVEIS existem como alvos permitidos de alteracao quando a instrucao mencionar explicitamente seus nomes.\n");
-        sb.append("6. Nunca altere BLOCOS_REFERENCIA.\n");
-        sb.append("7. Se houver conflito entre descricoes vagas, selecao atual e nomes de blocos, priorize primeiro o bloco PRIMARY, depois os nomes de blocos explicitamente citados pelo usuario.\n");
-        sb.append("8. Se existirem blocos nomeados ativos, considere-os parte do contexto oficial desta sessao.\n");
-        sb.append("9. A selecao atual do editor continua relevante, mas passa a ser contexto auxiliar quando houver bloco PRIMARY ativo, salvo instrucao explicita em sentido contrario.\n");
+            if (block.getKind().name().equals("REFERENCE")) {
+                encontrouReference = true;
+                sb.append("- ").append(block.getName())
+                  .append(" -> arquivo=").append(block.getFileName())
+                  .append(" | linhas=").append(block.getStartLine()).append("-").append(block.getEndLine())
+                  .append(" | papel=REFERENCE")
+                  .append(" | mutavel=false")
+                  .append("\n");
+            }
+        }
+
+        if (!encontrouReference) {
+            sb.append("- nenhum").append("\n");
+        }
+
+        sb.append("REGRAS:").append("\n");
+        sb.append("1. Bloco PRIMARY textual e o foco principal da tarefa e tambem pode ser alterado quando a acao do usuario exigir mutacao.").append("\n");
+        sb.append("2. Bloco EDITABLE textual tambem pode ser alterado.").append("\n");
+        sb.append("3. Bloco REFERENCE textual deve ser usado apenas como referencia e nao deve ser alterado.").append("\n");
+        sb.append("4. Se houver PRIMARY textual ativo, trate-o como o principal alvo mutavel da analise atual, salvo instrucao explicita em contrario.").append("\n");
+
         return sb.toString();
     }
 

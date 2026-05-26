@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<feature id="com.mcp.sailibrary.feature" label="SAI Library MCP Feature" version="1.0.0.202605221246">
+<feature id="com.mcp.sailibrary.feature" label="SAI Library MCP Feature" version="1.0.0.202605260251">
 
-   <plugin id="com.mcp.sailibrary.plugin" version="1.0.0.202605221246" />
+   <plugin id="com.mcp.sailibrary.plugin" version="1.0.0.202605260251" />
 </feature>

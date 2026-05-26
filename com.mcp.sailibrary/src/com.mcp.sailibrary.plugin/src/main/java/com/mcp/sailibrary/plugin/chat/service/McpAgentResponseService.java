@@ -4,49 +4,63 @@ import org.eclipse.jface.text.IDocument;
 import org.eclipse.jface.text.TextUtilities;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mcp.sailibrary.plugin.chat.support.AiResponse;
 
-/**
- * Encapsular extracao, parse, normalizacao e formatacao das respostas MCP e da IA.
- *
- * @author Renato Tomaz Nati
- * @since 2026-05-18
- */
+/** * Encapsular extracao, parse, normalizacao e formatacao das respostas MCP e da IA. * * @author Renato Tomaz Nati * @since 2026-05-18 */
 public class McpAgentResponseService {
 
     public String extrairTextoMcp(String respostaBruta) {
-        if (respostaBruta == null) return "";
+        if (respostaBruta == null) {
+            return "";
+        }
+
         String texto = respostaBruta.trim();
-        if (texto.length() == 0) return "";
+        if (texto.length() == 0) {
+            return "";
+        }
+
+        if (isModelInfrastructureFailureText(texto)) {
+            return texto;
+        }
 
         String textoExtraido = "";
         try {
             JsonObject envelope = JsonParser.parseString(texto).getAsJsonObject();
+
             if (envelope.has("result") && envelope.get("result").isJsonObject()) {
                 JsonObject result = envelope.getAsJsonObject("result");
+
                 if (result.has("content") && result.get("content").isJsonArray()) {
                     JsonArray contentArray = result.getAsJsonArray("content");
-                    if (contentArray.size() > 0 && contentArray.get(0).isJsonObject()) {
-                        JsonObject firstContent = contentArray.get(0).getAsJsonObject();
-                        if (firstContent.has("text") && !firstContent.get("text").isJsonNull()) {
-                            textoExtraido = firstContent.get("text").getAsString();
-                            return isolarJsonDaTag(textoExtraido);
+                    for (int i = 0; i < contentArray.size(); i++) {
+                        JsonElement item = contentArray.get(i);
+                        if (item != null && item.isJsonObject()) {
+                            JsonObject contentObject = item.getAsJsonObject();
+                            if (contentObject.has("text") && !contentObject.get("text").isJsonNull()) {
+                                textoExtraido = contentObject.get("text").getAsString();
+                                return limparEnvelopeTextual(textoExtraido);
+                            }
                         }
                     }
                 }
             }
+
             textoExtraido = desescapeJsonString(texto);
-            return isolarJsonDaTag(textoExtraido);
+            return limparEnvelopeTextual(textoExtraido);
         } catch (Exception e) {
             textoExtraido = desescapeJsonString(texto);
-            return isolarJsonDaTag(textoExtraido);
+            return limparEnvelopeTextual(textoExtraido);
         }
     }
 
     public String isolarJsonDaTag(String textoLLM) {
-        if (textoLLM == null) return "";
+        if (textoLLM == null) {
+            return "";
+        }
+
         String tagInicio = "<codigo_final>";
         String tagFim = "</codigo_final>";
         int indexInicio = textoLLM.indexOf(tagInicio);
@@ -62,73 +76,95 @@ public class McpAgentResponseService {
         }
 
         if (jsonExtraido.startsWith("```json")) {
-            jsonExtraido = jsonExtraido.substring(7);
+            jsonExtraido = jsonExtraido.substring(7).trim();
         } else if (jsonExtraido.startsWith("```")) {
-            jsonExtraido = jsonExtraido.substring(3);
+            jsonExtraido = jsonExtraido.substring(3).trim();
         }
 
         if (jsonExtraido.endsWith("```")) {
-            jsonExtraido = jsonExtraido.substring(0, jsonExtraido.length() - 3);
+            jsonExtraido = jsonExtraido.substring(0, jsonExtraido.length() - 3).trim();
         }
 
         return jsonExtraido.trim();
     }
 
     public String desescapeJsonString(String texto) {
-        if (texto == null) return "";
+        if (texto == null) {
+            return "";
+        }
+
         String textoLimpo = texto.trim();
-        textoLimpo = textoLimpo.replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t").replace("\\\"", "\"").replace("\\\\", "\\");
+        textoLimpo = textoLimpo
+                .replace("\\n", "\n")
+                .replace("\\r", "\r")
+                .replace("\\t", "\t")
+                .replace("\\\"", "\"")
+                .replace("\\\\", "\\");
+
         return textoLimpo;
     }
 
-    public AiResponse interpretarRespostaIA(String respostaJson) {
-        if (respostaJson == null) {
+    /** * Caller: SingleModelCoordinator, CodexCodeGenerationService * Callee: extrairJsonUtilDaResposta * Objetivo: Interpretar a resposta textual da IA aceitando tanto JSON puro * quanto respostas encapsuladas nas tags thinking, racional e codigo_final. * Feature: Quando houver bloco <codigo_final>, ele passa a ter prioridade como * fonte da verdade para o parse. * Data modificacao: 2026-05-25 * * @param textoResposta texto bruto extraido do MCP * @return resposta estruturada ou null quando o parse falhar * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    public AiResponse interpretarRespostaIA(String textoResposta) {
+        if (textoResposta == null || textoResposta.trim().length() == 0) {
+            System.out.println("[MCP PARSE DEBUG] textoResposta vazio.");
             return null;
         }
 
-        String texto = respostaJson.trim();
-        if (texto.length() == 0) {
+        String textoNormalizado = extrairJsonUtilDaResposta(textoResposta);
+        System.out.println("[MCP PARSE DEBUG] textoNormalizadoParaJson=" + truncateForDebug(textoNormalizado, 3000));
+
+        if (isModelInfrastructureFailureText(textoNormalizado)) {
+            System.out.println("[MCP PARSE DEBUG] Resposta classificada como falha de infraestrutura do provider/modelo.");
             return null;
         }
 
         try {
-            JsonObject jsonObject = JsonParser.parseString(texto).getAsJsonObject();
-            AiResponse respostaIA = new AiResponse();
+            JsonObject json = tentarExtrairObjetoJson(textoNormalizado);
 
-            if (jsonObject.has("action") && !jsonObject.get("action").isJsonNull()) {
-                respostaIA.setAction(jsonObject.get("action").getAsString());
+            if (json == null) {
+                System.out.println("[MCP PARSE DEBUG] Nenhum objeto JSON util encontrado na resposta.");
+                return null;
             }
 
-            if (jsonObject.has("content") && !jsonObject.get("content").isJsonNull()) {
-                respostaIA.setContent(jsonObject.get("content").getAsString());
+            AiResponse resposta = new AiResponse();
+
+            if (json.has("action") && !json.get("action").isJsonNull()) {
+                resposta.setAction(json.get("action").getAsString());
             }
 
-            if (jsonObject.has("explanation") && !jsonObject.get("explanation").isJsonNull()) {
-                respostaIA.setExplanation(jsonObject.get("explanation").getAsString());
+            if (json.has("content") && !json.get("content").isJsonNull()) {
+                resposta.setContent(extractFlexibleText(json.get("content")));
             }
 
-            if (jsonObject.has("tool") && !jsonObject.get("tool").isJsonNull()) {
-                respostaIA.setTool(jsonObject.get("tool").getAsString());
+            if (json.has("explanation") && !json.get("explanation").isJsonNull()) {
+                resposta.setExplanation(extractFlexibleText(json.get("explanation")));
             }
 
-            if (jsonObject.has("parameters") && jsonObject.get("parameters").isJsonObject()) {
-                respostaIA.setParameters(jsonObject.getAsJsonObject("parameters"));
+            if (json.has("tool") && !json.get("tool").isJsonNull()) {
+                resposta.setTool(json.get("tool").getAsString());
             }
 
-            if (jsonObject.has("question") && !jsonObject.get("question").isJsonNull()) {
-                respostaIA.setQuestion(jsonObject.get("question").getAsString());
+            if (json.has("question") && !json.get("question").isJsonNull()) {
+                resposta.setQuestion(extractFlexibleText(json.get("question")));
             }
 
-            if (jsonObject.has("expected_answer_type") && !jsonObject.get("expected_answer_type").isJsonNull()) {
-                respostaIA.setExpectedAnswerType(jsonObject.get("expected_answer_type").getAsString());
+            if (json.has("parameters") && json.get("parameters").isJsonObject()) {
+                resposta.setParameters(json.getAsJsonObject("parameters"));
             }
 
-            if (jsonObject.has("options") && jsonObject.get("options").isJsonArray()) {
-                respostaIA.setOptions(jsonObject.getAsJsonArray("options"));
+            if (json.has("expected_answer_type") && !json.get("expected_answer_type").isJsonNull()) {
+                resposta.setExpectedAnswerType(json.get("expected_answer_type").getAsString());
             }
 
-            return respostaIA;
+            if (json.has("options") && json.get("options").isJsonArray()) {
+                resposta.setOptions(json.getAsJsonArray("options"));
+            }
+
+            return resposta;
         } catch (Exception e) {
+            System.out.println("[MCP PARSE DEBUG] Falha ao parsear JSON: " + e.getMessage());
+            e.printStackTrace();
             return null;
         }
     }
@@ -279,6 +315,197 @@ public class McpAgentResponseService {
         }
     }
 
+    public boolean isModelInfrastructureFailureText(String text) {
+        String texto = safeLower(text);
+
+        if (texto.length() == 0) {
+            return false;
+        }
+
+        return texto.contains("error executing tool")
+                || texto.contains("template usage limit exceeded")
+                || texto.contains("max_tokens")
+                || texto.contains("maximum allowed number of output tokens")
+                || texto.contains("context length")
+                || texto.contains("rate limit")
+                || texto.contains("quota")
+                || texto.contains("timeout")
+                || texto.contains("timed out")
+                || texto.contains("service unavailable")
+                || texto.contains("unavailable")
+                || texto.contains("openaicompatible")
+                || texto.contains("malformedjsonexception")
+                || texto.contains("provider error");
+    }
+
+    public AiResponse buildInfrastructureFailureResponse(String detalheTecnico, boolean perguntarAoUsuario) {
+        AiResponse resposta = new AiResponse();
+
+        if (perguntarAoUsuario) {
+            resposta.setAction("perguntar_ao_usuario");
+            resposta.setQuestion("Percebi uma falha tecnica do modelo durante a execucao. Deseja que eu tente seguir mesmo assim com o que ja foi confirmado?");
+            resposta.setExplanation("Falha tecnica de infraestrutura do provider/modelo detectada antes do parse estruturado."
+                    + (detalheTecnico != null && detalheTecnico.trim().length() > 0
+                    ? " Detalhe tecnico: " + detalheTecnico
+                    : ""));
+            return resposta;
+        }
+
+        resposta.setAction("responder_ao_usuario");
+        resposta.setContent("Percebi uma falha tecnica do modelo durante a execucao. Nao tratei isso como resposta valida da IA. Se quiser, posso tentar novamente ou investigar a causa.");
+        resposta.setExplanation("Falha tecnica de infraestrutura do provider/modelo detectada antes do parse estruturado."
+                + (detalheTecnico != null && detalheTecnico.trim().length() > 0
+                ? " Detalhe tecnico: " + detalheTecnico
+                : ""));
+        return resposta;
+    }
+
+    private String truncateForDebug(String value, int max) {
+        if (value == null) {
+            return "null";
+        }
+
+        if (value.length() <= max) {
+            return value;
+        }
+
+        return value.substring(0, max) + "... [TRUNCATED]";
+    }
+
+    private String extrairJsonUtilDaResposta(String textoResposta) {
+        String texto = limparEnvelopeTextual(textoResposta);
+
+        if (isModelInfrastructureFailureText(texto)) {
+            return texto;
+        }
+
+        int inicioCodigoFinal = texto.indexOf("<codigo_final>");
+        int fimCodigoFinal = texto.indexOf("</codigo_final>");
+
+        if (inicioCodigoFinal >= 0 && fimCodigoFinal > inicioCodigoFinal) {
+            String conteudo = texto.substring(inicioCodigoFinal + "<codigo_final>".length(), fimCodigoFinal).trim();
+            System.out.println("[MCP PARSE DEBUG] Bloco <codigo_final> encontrado.");
+            return limparEnvelopeTextual(conteudo);
+        }
+
+        String jsonBalaceado = extractFirstBalancedJsonObject(texto);
+        if (jsonBalaceado != null && jsonBalaceado.trim().length() > 0) {
+            return jsonBalaceado;
+        }
+
+        return texto;
+    }
+
+    private String limparEnvelopeTextual(String texto) {
+        String valor = texto != null ? texto.trim() : "";
+
+        if (valor.startsWith("```json")) {
+            valor = valor.substring(7).trim();
+        } else if (valor.startsWith("```")) {
+            valor = valor.substring(3).trim();
+        }
+
+        if (valor.endsWith("```")) {
+            valor = valor.substring(0, valor.length() - 3).trim();
+        }
+
+        return valor.trim();
+    }
+
+    private JsonObject tentarExtrairObjetoJson(String textoNormalizado) {
+        if (textoNormalizado == null || textoNormalizado.trim().length() == 0) {
+            return null;
+        }
+
+        try {
+            JsonElement root = JsonParser.parseString(textoNormalizado);
+            if (root != null && root.isJsonObject()) {
+                return root.getAsJsonObject();
+            }
+        } catch (Exception e) {
+        }
+
+        String bloco = extractFirstBalancedJsonObject(textoNormalizado);
+        if (bloco != null && bloco.trim().length() > 0) {
+            try {
+                JsonElement root = JsonParser.parseString(bloco);
+                if (root != null && root.isJsonObject()) {
+                    return root.getAsJsonObject();
+                }
+            } catch (Exception e) {
+            }
+        }
+
+        return null;
+    }
+
+    private String extractFlexibleText(JsonElement element) {
+        if (element == null || element.isJsonNull()) {
+            return "";
+        }
+
+        try {
+            if (element.isJsonPrimitive()) {
+                return element.getAsString();
+            }
+
+            if (element.isJsonObject() || element.isJsonArray()) {
+                return element.toString();
+            }
+        } catch (Exception e) {
+        }
+
+        return "";
+    }
+
+    private String extractFirstBalancedJsonObject(String text) {
+        if (text == null || text.trim().length() == 0) {
+            return null;
+        }
+
+        int start = -1;
+        int depth = 0;
+        boolean insideString = false;
+        boolean escaping = false;
+
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+
+            if (escaping) {
+                escaping = false;
+                continue;
+            }
+
+            if (c == '\\' && insideString) {
+                escaping = true;
+                continue;
+            }
+
+            if (c == '"') {
+                insideString = !insideString;
+                continue;
+            }
+
+            if (insideString) {
+                continue;
+            }
+
+            if (c == '{') {
+                if (depth == 0) {
+                    start = i;
+                }
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0 && start >= 0) {
+                    return text.substring(start, i + 1);
+                }
+            }
+        }
+
+        return null;
+    }
+
     private String getLineDelimiter(IDocument doc) {
         String delimitador = System.lineSeparator();
         if (doc != null) {
@@ -288,5 +515,9 @@ public class McpAgentResponseService {
             }
         }
         return delimitador;
+    }
+
+    private String safeLower(String value) {
+        return value == null ? "" : value.trim().toLowerCase();
     }
 }

@@ -194,7 +194,11 @@ public class NamedBlocksController {
             refreshHighlights();
             refreshExplorerDecorations();
             sincronizarChatComPrimaryGlobal();
-            informarStatus("Bloco adicionado: " + block.getName() + " [" + block.getKind().name() + "]");
+            if (block.getKind() == NamedBlockKind.PRIMARY) {
+                informarStatus("Bloco principal adicionado: " + block.getName() + ". Este alvo principal tambem pode ser usado para alteracao.");
+            } else {
+                informarStatus("Bloco adicionado: " + block.getName() + " [" + block.getKind().name() + "]");
+            }
         } catch (Exception e) {
             informarStatus("Falha ao adicionar bloco: " + safeMessage(e));
         }

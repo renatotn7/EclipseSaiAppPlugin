@@ -38,7 +38,13 @@ import org.eclipse.ui.texteditor.ITextEditor;
 import com.mcp.sailibrary.plugin.Activator;
 import com.mcp.sailibrary.plugin.chat.blocks.views.NamedBlocksPanel;
 import com.mcp.sailibrary.plugin.chat.controllers.ChatAiController;
+import com.mcp.sailibrary.plugin.chat.controllers.ChatViewActivityController;
+import com.mcp.sailibrary.plugin.chat.controllers.ChatViewConfigurationController;
+import com.mcp.sailibrary.plugin.chat.settings.ChatRuntimeSettings;
+import com.mcp.sailibrary.plugin.chat.views.tabs.ChatActivityPanel;
+import com.mcp.sailibrary.plugin.chat.views.tabs.ChatConfigurationPanel;
 
+/** * View principal do chat de engenharia. * * <p>Responsabilidades desta classe: * <ul> * <li>compor as abas visuais</li> * <li>encaminhar eventos do usuario ao controller principal</li> * <li>manter historico visual da conversa</li> * <li>apresentar configuracao e atividade do agente</li> * </ul> * </p> * * <p>Persistencia de configuracao e trilha de atividade ficam fora desta classe, * em controllers dedicados, para reduzir acoplamento com logica nao visual.</p> * * @author Renato Tomaz Nati * @since 2026-05-24 */
 public class ChatView extends ViewPart {
 
     public static final String ID = "com.mcp.sailibrary.plugin.chat.views.ChatView";
@@ -47,21 +53,25 @@ public class ChatView extends ViewPart {
     private Text inputField;
     private org.eclipse.swt.widgets.Combo inputDepthField;
     private ProgressBar barraProgresso;
-   
     private StyledText resumoAlvoText;
 
     private Button btnSend;
     private Button btnVoltar;
     private Button btnAbandonar;
     private Button btnContexto;
-    
+
     private ToolBar barraLateralComandos;
     private List<Image> imagensToolbar = new ArrayList<Image>();
 
     private CTabFolder tabFolderPrincipal;
     private NamedBlocksPanel namedBlocksPanel;
+    private ChatConfigurationPanel chatConfigurationTab;
+    private ChatActivityPanel chatActivityTab;
 
     private ChatAiController controller;
+    private ChatViewConfigurationController chatConfigurationController;
+    private ChatViewActivityController chatActivityController;
+    private ChatRuntimeSettings chatRuntimeSettings;
 
     private Color colorToolBg;
     private Color colorIaBg;
@@ -73,11 +83,15 @@ public class ChatView extends ViewPart {
     private Color colorStatusBg;
     private Color colorPanelBg;
 
+    /** * Inicializa a view principal do chat. * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public ChatView() {
         super();
+        this.chatConfigurationController = new ChatViewConfigurationController();
+        this.chatActivityController = new ChatViewActivityController();
         this.controller = new ChatAiController(this);
     }
 
+    /** * Constroi a interface principal da view. * * @param parent componente pai * * @author Renato Tomaz Nati * @since 2026-05-24 */
     @Override
     public void createPartControl(Composite parent) {
         Display display = parent.getDisplay();
@@ -118,14 +132,24 @@ public class ChatView extends ViewPart {
 
         criarAbaConversa();
         criarAbaContexto();
+        criarAbaConfiguracao();
+        criarAbaAtividade();
 
         tabFolderPrincipal.addSelectionListener(new SelectionAdapter() {
             @Override
             public void widgetSelected(SelectionEvent e) {
-                if (tabFolderPrincipal != null && !tabFolderPrincipal.isDisposed()) {
-                    if (tabFolderPrincipal.getSelectionIndex() == 1 && namedBlocksPanel != null && !namedBlocksPanel.isDisposed()) {
-                        namedBlocksPanel.refreshPanel();
-                    }
+                if (tabFolderPrincipal == null || tabFolderPrincipal.isDisposed()) {
+                    return;
+                }
+
+                CTabItem itemSelecionado = tabFolderPrincipal.getSelection();
+                if (itemSelecionado == null) {
+                    return;
+                }
+
+                String textoAba = itemSelecionado.getText();
+                if ("Contexto".equals(textoAba) && namedBlocksPanel != null && !namedBlocksPanel.isDisposed()) {
+                    namedBlocksPanel.refreshPanel();
                 }
             }
         });
@@ -133,8 +157,11 @@ public class ChatView extends ViewPart {
         tabFolderPrincipal.setSelection(0);
 
         criarToolbarLateral(container);
+        carregarConfiguracaoPersistida();
+        aplicarConfiguracaoAtualNoController();
     }
 
+    /** * Cria a aba principal de conversa. * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void criarAbaConversa() {
         CTabItem abaChat = new CTabItem(tabFolderPrincipal, SWT.NONE);
         abaChat.setText("Conversa");
@@ -155,6 +182,7 @@ public class ChatView extends ViewPart {
         abaChat.setControl(conteudoChat);
     }
 
+    /** * Cria a aba de contexto. * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void criarAbaContexto() {
         CTabItem abaContexto = new CTabItem(tabFolderPrincipal, SWT.NONE);
         abaContexto.setText("Contexto");
@@ -165,6 +193,210 @@ public class ChatView extends ViewPart {
         abaContexto.setControl(namedBlocksPanel);
     }
 
+    /** * Cria a aba de configuracao. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private void criarAbaConfiguracao() {
+        CTabItem abaConfiguracao = new CTabItem(tabFolderPrincipal, SWT.NONE);
+        abaConfiguracao.setText("Configuracao");
+
+        chatConfigurationTab = new ChatConfigurationPanel(
+                tabFolderPrincipal,
+                SWT.NONE,
+                chatConfigurationController
+        );
+
+        chatConfigurationTab.getBtnSalvarConfiguracao().addListener(SWT.Selection, new Listener() {
+            @Override
+            public void handleEvent(Event event) {
+                salvarConfiguracaoPersistida();
+                aplicarConfiguracaoAtualNoController();
+                adicionarMensagem("Sistema", "Configuracao salva. Se os modelos necessarios nao estiverem acessiveis no MCP, o sistema podera pedir nomes explicitos ao usuario.");
+            }
+        });
+
+        abaConfiguracao.setControl(chatConfigurationTab);
+    }
+
+    /** * Cria a aba de atividade do agente. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private void criarAbaAtividade() {
+        CTabItem abaAtividade = new CTabItem(tabFolderPrincipal, SWT.NONE);
+        abaAtividade.setText("Atividade");
+
+        chatActivityTab = new ChatActivityPanel(
+                tabFolderPrincipal,
+                SWT.NONE,
+                chatActivityController
+        );
+
+        abaAtividade.setControl(chatActivityTab);
+    }
+
+    /** * Carrega a configuracao persistida ou aplica defaults seguros quando o * arquivo ainda nao existir. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private void carregarConfiguracaoPersistida() {
+        chatRuntimeSettings = chatConfigurationController.carregarConfiguracao();
+
+        if (chatRuntimeSettings == null) {
+            chatRuntimeSettings = new ChatRuntimeSettings();
+            chatRuntimeSettings.setDebugAtivo(false);
+            chatRuntimeSettings.setModoExecucao(ChatRuntimeSettings.MODO_EXECUCAO_MONO);
+            chatRuntimeSettings.setPerfilRaciocinio(ChatRuntimeSettings.PERFIL_PADRAO);
+        }
+
+        if (chatConfigurationTab != null && !chatConfigurationTab.isDisposed()) {
+            chatConfigurationTab.aplicarConfiguracao(chatRuntimeSettings);
+        }
+    }
+
+    /** * Persiste a configuracao atual capturada da aba de configuracao. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private void salvarConfiguracaoPersistida() {
+        if (chatConfigurationTab == null || chatConfigurationTab.isDisposed()) {
+            return;
+        }
+
+        ChatRuntimeSettings settings = chatConfigurationTab.extrairConfiguracao();
+        if (settings == null) {
+            return;
+        }
+
+        chatConfigurationController.salvarConfiguracao(settings);
+        chatRuntimeSettings = settings;
+    }
+
+    /** * Aplica no controller principal os valores de configuracao ativos. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    private void aplicarConfiguracaoAtualNoController() {
+        if (controller == null) {
+            return;
+        }
+
+        controller.setDebugAtivo(isDebugConfigurado());
+    }
+
+    /** * Retorna se o modo debug esta ativo. * * @return true quando o debug estiver ativo * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    public boolean isDebugConfigurado() {
+        if (chatRuntimeSettings != null) {
+            return chatRuntimeSettings.isDebugAtivo();
+        }
+
+        if (chatConfigurationTab != null && !chatConfigurationTab.isDisposed()) {
+            ChatRuntimeSettings settings = chatConfigurationTab.extrairConfiguracao();
+            if (settings != null) {
+                return settings.isDebugAtivo();
+            }
+        }
+
+        return false;
+    }
+
+    /** * Retorna o modo de execucao configurado. * * @return modo de execucao atual * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    public String getModoExecucaoConfigurado() {
+        if (chatRuntimeSettings != null
+                && chatRuntimeSettings.getModoExecucao() != null
+                && chatRuntimeSettings.getModoExecucao().trim().length() > 0) {
+            return chatRuntimeSettings.getModoExecucao();
+        }
+
+        if (chatConfigurationTab != null && !chatConfigurationTab.isDisposed()) {
+            ChatRuntimeSettings settings = chatConfigurationTab.extrairConfiguracao();
+            if (settings != null
+                    && settings.getModoExecucao() != null
+                    && settings.getModoExecucao().trim().length() > 0) {
+                return settings.getModoExecucao();
+            }
+        }
+
+        return ChatRuntimeSettings.MODO_EXECUCAO_MONO;
+    }
+
+    /** * Retorna o perfil de raciocinio configurado. * * @return perfil de raciocinio atual * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    public String getPerfilRaciocinioConfigurado() {
+        if (chatRuntimeSettings != null
+                && chatRuntimeSettings.getPerfilRaciocinio() != null
+                && chatRuntimeSettings.getPerfilRaciocinio().trim().length() > 0) {
+            return chatRuntimeSettings.getPerfilRaciocinio();
+        }
+
+        if (chatConfigurationTab != null && !chatConfigurationTab.isDisposed()) {
+            ChatRuntimeSettings settings = chatConfigurationTab.extrairConfiguracao();
+            if (settings != null
+                    && settings.getPerfilRaciocinio() != null
+                    && settings.getPerfilRaciocinio().trim().length() > 0) {
+                return settings.getPerfilRaciocinio();
+            }
+        }
+
+        return ChatRuntimeSettings.PERFIL_PADRAO;
+    }
+
+    /** * Registra uma nova linha de atividade do agente. * * @param fase fase logica * @param detalhe detalhe da atividade * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    public void registrarAtividadeAgente(final String fase, final String detalhe) {
+        Display.getDefault().asyncExec(new Runnable() {
+            @Override
+            public void run() {
+                if (chatActivityTab == null || chatActivityTab.isDisposed()) {
+                    return;
+                }
+
+                chatActivityTab.registrarAtividade(fase, detalhe);
+            }
+        });
+    }
+
+    /** * Limpa a trilha visual de atividade do agente. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    public void limparAtividadesAgente() {
+        Display.getDefault().asyncExec(new Runnable() {
+            @Override
+            public void run() {
+                if (chatActivityTab == null || chatActivityTab.isDisposed()) {
+                    return;
+                }
+
+                chatActivityTab.limparAtividade();
+            }
+        });
+    }
+
+    /** * Abre a aba de atividade. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    public void abrirAbaAtividade() {
+        if (tabFolderPrincipal == null || tabFolderPrincipal.isDisposed()) {
+            return;
+        }
+
+        CTabItem[] itens = tabFolderPrincipal.getItems();
+        for (int i = 0; i < itens.length; i++) {
+            if ("Atividade".equals(itens[i].getText())) {
+                tabFolderPrincipal.setSelection(itens[i]);
+                return;
+            }
+        }
+    }
+
+    /** * Abre a aba de configuracao. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    public void abrirAbaConfiguracao() {
+        if (tabFolderPrincipal == null || tabFolderPrincipal.isDisposed()) {
+            return;
+        }
+
+        CTabItem[] itens = tabFolderPrincipal.getItems();
+        for (int i = 0; i < itens.length; i++) {
+            if ("Configuracao".equals(itens[i].getText())) {
+                tabFolderPrincipal.setSelection(itens[i]);
+                return;
+            }
+        }
+    }
+
+    /** * Informa ao usuario que os modelos necessarios nao puderam ser alcancados * automaticamente. * * @param modelosNecessarios descricao dos modelos esperados * * @author Renato Tomaz Nati * @since 2026-05-24 */
+    public void solicitarEscolhaExplicitaDeModelos(final String modelosNecessarios) {
+        StringBuilder mensagem = new StringBuilder();
+        mensagem.append("Nao foi possivel alcancar automaticamente os modelos necessarios no MCP.").append(System.lineSeparator());
+        mensagem.append("Abra a aba Configuracao e revise a estrategia.").append(System.lineSeparator());
+        mensagem.append("Se for necessario, informe explicitamente os nomes dos modelos desejados.").append(System.lineSeparator());
+        mensagem.append("Modelos esperados: ").append(modelosNecessarios != null ? modelosNecessarios : "nao informado");
+
+        adicionarMensagem("Sistema", mensagem.toString());
+        abrirAbaConfiguracao();
+    }
+
+    /** * Cria a barra lateral de comandos rapidos. * * @param parent componente pai * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void criarToolbarLateral(Composite parent) {
         Composite lateral = new Composite(parent, SWT.NONE);
         GridLayout layoutLateral = new GridLayout(1, false);
@@ -223,6 +455,7 @@ public class ChatView extends ViewPart {
         );
     }
 
+    /** * Cria um item da toolbar lateral. * * @param tooltip descricao do item * @param comando comando a anexar na entrada * @param caminhoIcone caminho do icone * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void criarItemToolbar(final String tooltip, final String comando, String caminhoIcone) {
         ToolItem item = new ToolItem(barraLateralComandos, SWT.PUSH);
 
@@ -244,6 +477,7 @@ public class ChatView extends ViewPart {
         });
     }
 
+    /** * Anexa comando pronto no campo de entrada. * * @param comando texto do comando * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void anexarComandoNaEntrada(String comando) {
         if (inputField != null && !inputField.isDisposed()) {
             String textoAtual = inputField.getText();
@@ -270,6 +504,7 @@ public class ChatView extends ViewPart {
         }
     }
 
+    /** * Carrega e escala icone da toolbar. * * @param caminho caminho do icone * @param largura largura desejada * @param altura altura desejada * @return imagem carregada ou null * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private Image carregarImagemToolbar(String caminho, int largura, int altura) {
         try {
             ImageDescriptor descriptor = org.eclipse.ui.plugin.AbstractUIPlugin.imageDescriptorFromPlugin(Activator.PLUGIN_ID, caminho);
@@ -288,6 +523,7 @@ public class ChatView extends ViewPart {
         return null;
     }
 
+    /** * Cria o painel de resumo do alvo atual. * * @param parent componente pai * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void criarPainelResumoAlvo(Composite parent) {
         Group grupoResumo = new Group(parent, SWT.NONE);
         grupoResumo.setText("Alvo atual");
@@ -307,7 +543,7 @@ public class ChatView extends ViewPart {
         resumoAlvoText.setText("Nenhum alvo ativo");
     }
 
- 
+    /** * Cria o historico visual da conversa. * * @param parent componente pai * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void criarHistoricoChat(Composite parent) {
         chatHistory = new StyledText(parent, SWT.BORDER | SWT.MULTI | SWT.V_SCROLL | SWT.WRAP);
         GridData gdHistory = new GridData(SWT.FILL, SWT.FILL, true, true);
@@ -319,6 +555,7 @@ public class ChatView extends ViewPart {
         chatHistory.setEditable(false);
     }
 
+    /** * Cria o painel de entrada de comando. * * @param parent componente pai * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void criarPainelEntrada(Composite parent) {
         Group grupoEntrada = new Group(parent, SWT.NONE);
         grupoEntrada.setText("Comando");
@@ -418,6 +655,7 @@ public class ChatView extends ViewPart {
         });
     }
 
+    /** * Cria a barra de progresso. * * @param parent componente pai * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void criarBarraProgresso(Composite parent) {
         barraProgresso = new ProgressBar(parent, SWT.INDETERMINATE);
         GridData gdProgresso = new GridData(SWT.FILL, SWT.CENTER, true, false);
@@ -426,6 +664,7 @@ public class ChatView extends ViewPart {
         barraProgresso.setVisible(false);
     }
 
+    /** * Alterna o estado visual de carregamento da view. * * @param ativo true quando a execucao estiver ativa * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void alternarCarregamento(final boolean ativo) {
         Display.getDefault().asyncExec(new Runnable() {
             @Override
@@ -479,6 +718,7 @@ public class ChatView extends ViewPart {
         });
     }
 
+    /** * Atualiza o resumo visual do alvo atual. * * @param resumo texto do resumo * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void atualizarResumoAlvo(final String resumo) {
         Display.getDefault().asyncExec(new Runnable() {
             @Override
@@ -490,10 +730,12 @@ public class ChatView extends ViewPart {
         });
     }
 
+    /** * Metodo preservado para compatibilidade com o controller principal. * * @param status status atual * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void atualizarStatusOperacional(final String status) {
         // Metodo preservado para compatibilidade com o controlador.
     }
 
+    /** * Adiciona mensagem na conversa de forma assincrona. * * @param remetente remetente logico * @param mensagem conteudo textual * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void adicionarMensagemAssincrona(final String remetente, final String mensagem) {
         Display.getDefault().asyncExec(new Runnable() {
             @Override
@@ -503,11 +745,13 @@ public class ChatView extends ViewPart {
         });
     }
 
+    /** * Define foco no componente mais apropriado da view. * * @author Renato Tomaz Nati * @since 2026-05-24 */
     @Override
     public void setFocus() {
         if (tabFolderPrincipal != null && !tabFolderPrincipal.isDisposed()) {
-            int index = tabFolderPrincipal.getSelectionIndex();
-            if (index == 1 && namedBlocksPanel != null && !namedBlocksPanel.isDisposed()) {
+            CTabItem itemSelecionado = tabFolderPrincipal.getSelection();
+            if (itemSelecionado != null && "Contexto".equals(itemSelecionado.getText())
+                    && namedBlocksPanel != null && !namedBlocksPanel.isDisposed()) {
                 namedBlocksPanel.setFocus();
                 return;
             }
@@ -518,12 +762,14 @@ public class ChatView extends ViewPart {
         }
     }
 
+    /** * Encaminha a atualizacao de contexto ao controller principal. * * @param selectedCode trecho textual selecionado * @param fullFileText conteudo integral do arquivo * @param apiKey chave MCP * @param document documento atual * @param selection selecao atual * @param compUnit compilation unit atual * @param textEditor editor atual * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void setContext(String selectedCode, String fullFileText, String apiKey, IDocument document, ITextSelection selection, ICompilationUnit compUnit, ITextEditor textEditor) {
         if (this.controller != null) {
             this.controller.setContext(selectedCode, fullFileText, apiKey, document, selection, compUnit, textEditor);
         }
     }
 
+    /** * Ativa o editor informado. * * @param editor editor alvo * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void ativarEditor(IEditorPart editor) {
         try {
             getSite().getPage().activate(editor);
@@ -531,6 +777,7 @@ public class ChatView extends ViewPart {
         }
     }
 
+    /** * Processa o comando atual digitado pelo usuario. * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void processarEntrada() {
         String instrucao = inputField.getText();
         if (instrucao == null || instrucao.trim().length() == 0) {
@@ -539,6 +786,8 @@ public class ChatView extends ViewPart {
 
         adicionarMensagem("Usuario", instrucao);
         inputField.setText("");
+        registrarAtividadeAgente("USUARIO", "Comando enviado para processamento.");
+        adicionarMensagem("Sistema", "Se quiser acompanhar os detalhes da execucao, abra a aba Atividade.");
 
         String profundidadeStr = inputDepthField.getText();
         int profundidadeMax = 0;
@@ -553,13 +802,14 @@ public class ChatView extends ViewPart {
         }
     }
 
+    /** * Adiciona mensagem visual ao historico da conversa. * * @param remetente remetente logico * @param mensagem mensagem textual * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void adicionarMensagem(String remetente, String mensagem) {
         if (chatHistory == null || chatHistory.isDisposed()) {
             return;
         }
 
         String remetenteLower = remetente != null ? remetente.toLowerCase() : "";
-        
+
         if (remetenteLower.contains("debug")) {
             return;
         }
@@ -616,16 +866,19 @@ public class ChatView extends ViewPart {
         chatHistory.setTopIndex(chatHistory.getLineCount() - 1);
     }
 
+    /** * Limpa o historico visual da conversa. * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void limparHistorico() {
         if (chatHistory != null && !chatHistory.isDisposed()) {
             chatHistory.setText("");
         }
     }
 
+    /** * Retorna o controller principal da view. * * @return controller principal * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public ChatAiController getController() {
         return this.controller;
     }
 
+    /** * Libera os recursos graficos da view. * * @author Renato Tomaz Nati * @since 2026-05-24 */
     @Override
     public void dispose() {
         if (colorToolBg != null && !colorToolBg.isDisposed()) colorToolBg.dispose();
@@ -651,25 +904,35 @@ public class ChatView extends ViewPart {
         super.dispose();
     }
 
+    /** * Retorna o painel de blocos nomeados. * * @return painel de contexto nomeado * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public NamedBlocksPanel getNamedBlocksPanel() {
         return namedBlocksPanel;
     }
 
+    /** * Abre a aba de contexto. * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void abrirAbaContexto() {
         if (tabFolderPrincipal != null && !tabFolderPrincipal.isDisposed()) {
-            tabFolderPrincipal.setSelection(1);
-            if (namedBlocksPanel != null && !namedBlocksPanel.isDisposed()) {
-                namedBlocksPanel.refreshPanel();
+            CTabItem[] itens = tabFolderPrincipal.getItems();
+            for (int i = 0; i < itens.length; i++) {
+                if ("Contexto".equals(itens[i].getText())) {
+                    tabFolderPrincipal.setSelection(itens[i]);
+                    if (namedBlocksPanel != null && !namedBlocksPanel.isDisposed()) {
+                        namedBlocksPanel.refreshPanel();
+                    }
+                    return;
+                }
             }
         }
     }
-    /** * Solicita ao controlador a sincronizacao do alvo atual a partir do PRIMARY * global da sessao. * * @author Renato Tomaz Nati * @since 2026-05-20 */
+
+    /** * Solicita ao controller a sincronizacao do alvo atual. * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void sincronizarAlvoPrimarioGlobal() {
         if (controller != null) {
             controller.sincronizarAlvoPrimarioGlobal();
         }
     }
-    /** * Anexa um alias de contexto na entrada da conversa. * * <p>Se a entrada ja contiver texto, o alias e inserido ao final com espaco de * separacao. Se a entrada estiver vazia, o alias passa a ser o primeiro * conteudo do campo.</p> * * @param alias alias a ser inserido, como @nome * * @author Renato Tomaz Nati * @since 2026-05-20 */
+
+    /** * Anexa um alias de contexto na entrada da conversa. * * @param alias alias a ser inserido * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void anexarAliasNaEntrada(String alias) {
         if (inputField == null || inputField.isDisposed()) {
             return;

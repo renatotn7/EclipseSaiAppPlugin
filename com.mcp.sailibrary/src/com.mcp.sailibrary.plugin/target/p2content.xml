@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <units size='1'>
-  <unit id='com.mcp.sailibrary.plugin' version='1.0.0.202605221246' generation='2'>
-    <update id='com.mcp.sailibrary.plugin' range='[0.0.0,1.0.0.202605221246)' severity='0'/>
+  <unit id='com.mcp.sailibrary.plugin' version='1.0.0.202605260251' generation='2'>
+    <update id='com.mcp.sailibrary.plugin' range='[0.0.0,1.0.0.202605260251)' severity='0'/>
     <properties size='6'>
       <property name='org.eclipse.equinox.p2.name' value='SAI Library MCP Plugin'/>
       <property name='org.eclipse.equinox.p2.provider' value='SaiLibraryMCPPlugin'/>
@@ -11,9 +11,9 @@
       <property name='maven-type' value='eclipse-plugin'/>
     </properties>
     <provides size='4'>
-      <provided namespace='org.eclipse.equinox.p2.iu' name='com.mcp.sailibrary.plugin' version='1.0.0.202605221246'/>
-      <provided namespace='osgi.bundle' name='com.mcp.sailibrary.plugin' version='1.0.0.202605221246'/>
-      <provided namespace='osgi.identity' name='com.mcp.sailibrary.plugin' version='1.0.0.202605221246'>
+      <provided namespace='org.eclipse.equinox.p2.iu' name='com.mcp.sailibrary.plugin' version='1.0.0.202605260251'/>
+      <provided namespace='osgi.bundle' name='com.mcp.sailibrary.plugin' version='1.0.0.202605260251'/>
+      <provided namespace='osgi.identity' name='com.mcp.sailibrary.plugin' version='1.0.0.202605260251'>
         <properties size='1'>
           <property name='type' value='osgi.bundle'/>
         </properties>
@@ -45,20 +45,20 @@
           com.mcp.sailibrary.plugin
         </description>
       </requiredProperties>
-      <required namespace='org.eclipse.equinox.p2.iu' name='com.mcp.sailibrary.plugin.source' range='[1.0.0.202605221246,1.0.0.202605221246]' optional='true'>
+      <required namespace='org.eclipse.equinox.p2.iu' name='com.mcp.sailibrary.plugin.source' range='[1.0.0.202605260251,1.0.0.202605260251]' optional='true'>
         <filter>
           (org.eclipse.update.install.sources=true)
         </filter>
       </required>
     </requires>
     <artifacts size='1'>
-      <artifact classifier='osgi.bundle' id='com.mcp.sailibrary.plugin' version='1.0.0.202605221246'/>
+      <artifact classifier='osgi.bundle' id='com.mcp.sailibrary.plugin' version='1.0.0.202605260251'/>
     </artifacts>
     <touchpoint id='org.eclipse.equinox.p2.osgi' version='1.0.0'/>
     <touchpointData size='1'>
       <instructions size='1'>
         <instruction key='manifest'>
-          Bundle-SymbolicName: com.mcp.sailibrary.plugin;singleton:=true&#xA;Bundle-Version: 1.0.0.202605221246&#xA;
+          Bundle-SymbolicName: com.mcp.sailibrary.plugin;singleton:=true&#xA;Bundle-Version: 1.0.0.202605260251&#xA;
         </instruction>
       </instructions>
     </touchpointData>

@@ -19,6 +19,7 @@ public class SafeWorkspaceMutationPolicy {
         this.registryService = new CreatedArtifactRegistryService(rootDirectory);
     }
 
+    /** * Caller: CreateProjectFileTool, QueryWorkspaceMutationPolicyTool * Callee: NamedStructuralContextSessionService.findByName, resolveBaseDirectory, isInsideRoot * Objetivo: Validar se um contexto estrutural pode receber criacao de arquivo. * Feature: Contexto PRIMARY agora tambem vale como mutavel para criacao, assim * como EDITABLE. REFERENCE continua bloqueado. * Data modificacao: 2026-05-24 00:00 * * @param targetName nome do contexto estrutural alvo * @param relativePath caminho relativo do novo arquivo * @return true quando a criacao for permitida * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public boolean canCreateFile(String targetName, String relativePath) {
         if (isBlank(targetName) || isBlank(relativePath)) {
             return false;
@@ -29,7 +30,8 @@ public class SafeWorkspaceMutationPolicy {
             return false;
         }
 
-        if (context.getRole() != NamedContextTargetRole.EDITABLE) {
+        if (context.getRole() != NamedContextTargetRole.EDITABLE
+                && context.getRole() != NamedContextTargetRole.PRIMARY) {
             return false;
         }
 
@@ -47,6 +49,7 @@ public class SafeWorkspaceMutationPolicy {
         return isInsideRoot(targetFile);
     }
 
+    /** * Caller: CreateProjectPackageTool, QueryWorkspaceMutationPolicyTool * Callee: canCreateFile * Objetivo: Reaproveitar a mesma regra de permissao para criacao de package ou pasta. * Feature: PRIMARY estrutural tambem passa a autorizar criacao, assim como EDITABLE. * Data modificacao: 2026-05-24 00:00 * * @param targetName nome do contexto estrutural alvo * @param relativePath caminho relativo da package ou pasta * @return true quando a criacao for permitida * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public boolean canCreatePackage(String targetName, String relativePath) {
         return canCreateFile(targetName, relativePath);
     }

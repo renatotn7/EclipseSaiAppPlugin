@@ -10,6 +10,7 @@
     <module>com.mcp.sailibrary.plugin</module>
     <module>com.mcp.sailibrary.feature</module>
     <module>com.mcp.sailibrary.site</module>
+    <module>com.mcp.sailibrary.tests</module>
   </modules>
 
   <properties>
