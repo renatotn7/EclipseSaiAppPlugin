@@ -1,12 +1,12 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <?artifactRepository version='1.1.0'?>
 <artifacts size='1'>
-  <artifact classifier='osgi.bundle' id='com.mcp.sailibrary.plugin' version='1.0.0.202605260251'>
+  <artifact classifier='osgi.bundle' id='com.mcp.sailibrary.plugin' version='1.0.0.202606211802'>
     <properties size='8'>
-      <property name='artifact.size' value='5740238'/>
-      <property name='download.size' value='5740238'/>
-      <property name='download.checksum.sha-512' value='5d59cf6cd16a6028601f89b6b8f92370ce5bb3a23dfe5e51a60dea89b6cb4ac5f3051f967531b88ac3b5d19d1335c9c36e6c807e04046446e7313701e9f26e59'/>
-      <property name='download.checksum.sha-256' value='4c7db4b04ec09d485a9365b83e16f87a856abb3337b9914910556c4b70459db2'/>
+      <property name='artifact.size' value='5894107'/>
+      <property name='download.size' value='5894107'/>
+      <property name='download.checksum.sha-512' value='1f039a9aadad997951a287f9d9aaf9c04c4d90dd2b574a1e2ec6f8c5f6cabae850ad67e800c0d428d309ddacb71c4526bea8af2a8928817840957bb8e82e80da'/>
+      <property name='download.checksum.sha-256' value='5bf3c45267f4c5ab366e766e8c9eb9c58cb8f424519a4f093a5814914b2e3392'/>
       <property name='maven-groupId' value='com.mcp'/>
       <property name='maven-artifactId' value='com.mcp.sailibrary.plugin'/>
       <property name='maven-version' value='1.0.0-SNAPSHOT'/>

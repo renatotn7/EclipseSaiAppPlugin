@@ -9,6 +9,11 @@ import org.eclipse.jdt.core.ICompilationUnit;
 import com.mcp.sailibrary.plugin.agent.AgentTool;
 import com.mcp.sailibrary.plugin.agent.tools.architecture.ChangeImpactSummaryTool;
 import com.mcp.sailibrary.plugin.agent.tools.architecture.InheritanceDiscoveryTool;
+import com.mcp.sailibrary.plugin.agent.tools.architecture.ProjectStructureInventoryTool;
+import com.mcp.sailibrary.plugin.agent.tools.architecture.NamingConventionDiscoveryTool;
+import com.mcp.sailibrary.plugin.agent.tools.architecture.PersistenceStyleDetectionTool;
+import com.mcp.sailibrary.plugin.agent.tools.architecture.ExistingProblemReconTool;
+import com.mcp.sailibrary.plugin.agent.tools.architecture.ArchitectureOrientationTool;
 import com.mcp.sailibrary.plugin.agent.tools.architecture.ProjectDependencyInspectionTool;
 import com.mcp.sailibrary.plugin.agent.tools.architecture.QueryExtractionTool;
 import com.mcp.sailibrary.plugin.agent.tools.architecture.TypeImplementationDiscoveryTool;
@@ -49,6 +54,12 @@ public class AgentToolRegistryFactory {
         registry.add(new FileContentReadTool(raizProjetoWorkspace));
         registry.add(new ProjectTextSearchTool(raizProjetoWorkspace));
         registry.add(new ProjectRootDetectionTool(raizProjetoWorkspace));
+
+        registry.add(new ProjectStructureInventoryTool(raizProjetoWorkspace));
+        registry.add(new NamingConventionDiscoveryTool(raizProjetoWorkspace));
+        registry.add(new PersistenceStyleDetectionTool(raizProjetoWorkspace));
+        registry.add(new ExistingProblemReconTool(raizProjetoWorkspace));
+        registry.add(new ArchitectureOrientationTool(raizProjetoWorkspace));
 
         registry.add(new JdtContextSearchTool());
         registry.add(new JdtSourceSliceTool(raizProjetoWorkspace));

@@ -3,26 +3,40 @@ package com.mcp.sailibrary.plugin.agent.context.analise;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
+import java.io.FileWriter;
+import java.util.Date;
 import java.security.MessageDigest;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
-/** * Gerencia a memoria persistente por projeto em diretorio local do usuario, * com contexto de branch e dados estruturais reutilizaveis. * * <p>Esta implementacao foi reforcada para reduzir fragmentacao de memoria em * projetos Maven multimodulo e em workspaces com mais de um `.project`. A * chave do projeto e a raiz semantica da memoria agora sao baseadas em um * diretorio de identidade mais estavel, priorizando: * <ul> * <li>o `.project` mais proximo</li> * <li>ou o `pom.xml` mais proximo</li> * <li>ou, em ultimo caso, o diretorio originalmente informado</li> * </ul> * </p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+/** * Gerencia a memoria persistente por projeto em diretorio local do usuario, * com contexto de branch e dados estruturais reutilizaveis. * * <p>Esta implementacao foi reforcada para reduzir fragmentacao de memoria em * projetos Maven multimodulo e em workspaces com mais de um `.project`. A * chave do projeto e a raiz semantica da memoria agora sao baseadas em um * diretorio de identidade mais estavel.</p> * * <p>Tambem foi ajustada para: * - suportar registro explicito de branch_context * - persistir javaVersion/groupId em dependency_snapshot * - resumir javaVersion/groupId com fallback entre project_memory e dependency_snapshot * - nao sobrescrever branch registrada manualmente quando a deteccao automatica * nao encontrar `.git/HEAD` no ambiente atual</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
 public class ProjectMemoryStore {
 
     private File projectRootDirectory;
     private ProjectMemoryPaths memoryPaths;
     private ProjectMemoryJsonSupport jsonSupport;
 
-    /** * Inicializa a estrutura de memoria persistente para o projeto informado. * * @param projectRootDirectory raiz original informada * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Inicializa a estrutura de memoria persistente para o projeto informado. * * @param projectRootDirectory raiz original informada */
     public ProjectMemoryStore(File projectRootDirectory) {
         this.projectRootDirectory = resolverDiretorioIdentidade(projectRootDirectory);
         this.jsonSupport = new ProjectMemoryJsonSupport();
         this.memoryPaths = new ProjectMemoryPaths(gerarProjectKey(this.projectRootDirectory));
     }
 
-    /** * Registra uma memoria basica do projeto com raiz segura e metadados * minimos. * * @param safeRoot raiz segura percebida * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /**
+     * Inicializa a memoria persistente a partir de caminho textual.
+     *
+     * @param projectRootDirectory caminho da raiz do projeto
+     */
+    public ProjectMemoryStore(String projectRootDirectory) {
+        this(projectRootDirectory != null && projectRootDirectory.trim().length() > 0
+                ? new File(projectRootDirectory)
+                : null);
+    }
+
+
+    /** * Registra uma memoria basica do projeto com raiz segura e metadados * minimos. * * @param safeRoot raiz segura percebida */
     public void registrarProjectMemoryBasica(String safeRoot) {
         JsonObject root = jsonSupport.lerJson(memoryPaths.getProjectMemoryFile());
 
@@ -34,7 +48,7 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getProjectMemoryFile(), root);
     }
 
-    /** * Retorna um resumo curto da memoria persistente para enriquecer a * instrucao da IA. * * @return resumo textual da memoria do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Retorna um resumo curto da memoria persistente para enriquecer a * instrucao da IA. * * @return resumo textual da memoria do projeto */
     public String consultarResumoMemoria() {
         JsonObject projectMemory = jsonSupport.lerJson(memoryPaths.getProjectMemoryFile());
         JsonObject branchContext = jsonSupport.lerJson(memoryPaths.getBranchContextFile());
@@ -52,12 +66,29 @@ public class ProjectMemoryStore {
         if (projectMemory.has("buildTool")) {
             resumo.append("buildTool: ").append(projectMemory.get("buildTool").getAsString()).append("\n");
         }
+
+        String javaVersion = "";
         if (projectMemory.has("javaVersion")) {
-            resumo.append("javaVersion: ").append(projectMemory.get("javaVersion").getAsString()).append("\n");
+            javaVersion = projectMemory.get("javaVersion").getAsString();
         }
+        if ((javaVersion == null || javaVersion.length() == 0) && dependencySnapshot.has("javaVersion")) {
+            javaVersion = dependencySnapshot.get("javaVersion").getAsString();
+        }
+        if (javaVersion != null && javaVersion.length() > 0) {
+            resumo.append("javaVersion: ").append(javaVersion).append("\n");
+        }
+
+        String groupId = "";
         if (projectMemory.has("groupId")) {
-            resumo.append("groupId: ").append(projectMemory.get("groupId").getAsString()).append("\n");
+            groupId = projectMemory.get("groupId").getAsString();
         }
+        if ((groupId == null || groupId.length() == 0) && dependencySnapshot.has("groupId")) {
+            groupId = dependencySnapshot.get("groupId").getAsString();
+        }
+        if (groupId != null && groupId.length() > 0) {
+            resumo.append("groupId: ").append(groupId).append("\n");
+        }
+
         if (branchContext.has("currentBranch")) {
             resumo.append("currentBranch: ").append(branchContext.get("currentBranch").getAsString()).append("\n");
         }
@@ -80,7 +111,7 @@ public class ProjectMemoryStore {
         return resumo.toString();
     }
 
-    /** * Garante que os arquivos basicos existam em disco com estrutura inicial. * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Garante que os arquivos basicos existam em disco com estrutura inicial. */
     public void inicializarEstrutura() {
         criarSeAusente(memoryPaths.getProjectMemoryFile(), criarProjectMemoryInicial());
         criarSeAusente(memoryPaths.getToolHistoryFile(), criarToolHistoryInicial());
@@ -89,23 +120,43 @@ public class ProjectMemoryStore {
         criarSeAusente(memoryPaths.getBranchContextFile(), criarBranchContextInicial());
     }
 
-    /** * Atualiza o contexto da branch atual percebida no projeto. * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Atualiza o contexto da branch atual percebida no projeto. * * <p>Regra importante: * se a deteccao automatica nao encontrar branch alguma, o metodo preserva a * branch ja registrada anteriormente, evitando apagar contexto valido * informado manualmente.</p> */
     public void atualizarBranchContexto() {
         JsonObject branchContext = jsonSupport.lerJson(memoryPaths.getBranchContextFile());
-        String branchAtual = detectarBranchAtual();
+        String branchAtualDetectada = detectarBranchAtual();
 
-        String ultimaBranch = "";
+        String branchRegistrada = "";
         if (branchContext.has("currentBranch")) {
-            ultimaBranch = branchContext.get("currentBranch").getAsString();
+            branchRegistrada = branchContext.get("currentBranch").getAsString();
         }
 
         branchContext.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
         branchContext.addProperty("projectRoot", normalizarCaminho(projectRootDirectory));
         branchContext.addProperty("lastSeenAt", String.valueOf(System.currentTimeMillis()));
-        branchContext.addProperty("currentBranch", branchAtual);
 
-        if (ultimaBranch != null && ultimaBranch.length() > 0 && !ultimaBranch.equals(branchAtual)) {
-            branchContext.addProperty("previousBranch", ultimaBranch);
+        if (branchAtualDetectada == null || branchAtualDetectada.trim().length() == 0) {
+            if (branchRegistrada == null || branchRegistrada.trim().length() == 0) {
+                branchContext.addProperty("currentBranch", "");
+                if (!branchContext.has("reconfirmSensitiveHints")) {
+                    branchContext.addProperty("reconfirmSensitiveHints", "false");
+                }
+            } else {
+                branchContext.addProperty("currentBranch", branchRegistrada);
+                if (!branchContext.has("reconfirmSensitiveHints")) {
+                    branchContext.addProperty("reconfirmSensitiveHints", "false");
+                }
+            }
+
+            jsonSupport.gravarJson(memoryPaths.getBranchContextFile(), branchContext);
+            return;
+        }
+
+        branchContext.addProperty("currentBranch", branchAtualDetectada);
+
+        if (branchRegistrada != null
+                && branchRegistrada.length() > 0
+                && !branchRegistrada.equals(branchAtualDetectada)) {
+            branchContext.addProperty("previousBranch", branchRegistrada);
             branchContext.addProperty("reconfirmSensitiveHints", "true");
         } else if (!branchContext.has("reconfirmSensitiveHints")) {
             branchContext.addProperty("reconfirmSensitiveHints", "false");
@@ -114,7 +165,40 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getBranchContextFile(), branchContext);
     }
 
-    /** * Registra informacoes estruturais mais estaveis do projeto. * * @param safeRoot raiz segura percebida * @param buildTool ferramenta de build * @param javaVersion versao Java percebida * @param groupId groupId percebido * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Registra contexto explicito de branch. * * @param currentBranch branch atual * @param reconfirmSensitiveHints indicador textual */
+    public void registrarBranchContext(String currentBranch, String reconfirmSensitiveHints) {
+        JsonObject branchContext = jsonSupport.lerJson(memoryPaths.getBranchContextFile());
+
+        String ultimaBranch = "";
+        if (branchContext.has("currentBranch")) {
+            ultimaBranch = branchContext.get("currentBranch").getAsString();
+        }
+
+        String branchSegura = valorSeguro(currentBranch);
+        String reconfirmSeguro = valorSeguro(reconfirmSensitiveHints);
+
+        branchContext.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
+        branchContext.addProperty("projectRoot", normalizarCaminho(projectRootDirectory));
+        branchContext.addProperty("lastSeenAt", String.valueOf(System.currentTimeMillis()));
+        branchContext.addProperty("currentBranch", branchSegura);
+
+        if (ultimaBranch != null && ultimaBranch.length() > 0 && !ultimaBranch.equals(branchSegura)) {
+            branchContext.addProperty("previousBranch", ultimaBranch);
+            if (reconfirmSeguro.length() == 0) {
+                branchContext.addProperty("reconfirmSensitiveHints", "true");
+            }
+        }
+
+        if (reconfirmSeguro.length() > 0) {
+            branchContext.addProperty("reconfirmSensitiveHints", reconfirmSeguro);
+        } else if (!branchContext.has("reconfirmSensitiveHints")) {
+            branchContext.addProperty("reconfirmSensitiveHints", "false");
+        }
+
+        jsonSupport.gravarJson(memoryPaths.getBranchContextFile(), branchContext);
+    }
+
+    /** * Registra informacoes estruturais mais estaveis do projeto. * * @param safeRoot raiz segura percebida * @param buildTool ferramenta de build * @param javaVersion versao Java percebida * @param groupId groupId percebido */
     public void registrarProjectMemory(String safeRoot, String buildTool, String javaVersion, String groupId) {
         JsonObject root = jsonSupport.lerJson(memoryPaths.getProjectMemoryFile());
 
@@ -129,12 +213,19 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getProjectMemoryFile(), root);
     }
 
-    /** * Registra um snapshot de dependencias e frameworks percebidos. * * @param dependencies dependencias detectadas * @param frameworks frameworks detectados * @param modules modulos detectados * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Registra um snapshot de dependencias e frameworks percebidos. * * <p>Metodo mantido por compatibilidade com chamadas antigas.</p> * * @param dependencies dependencias detectadas * @param frameworks frameworks detectados * @param modules modulos detectados */
     public void registrarDependencySnapshot(JsonArray dependencies, JsonArray frameworks, JsonArray modules) {
+        registrarDependencySnapshot(dependencies, frameworks, modules, "", "");
+    }
+
+    /** * Registra um snapshot de dependencias, frameworks e metadados estruturais. * * @param dependencies dependencias detectadas * @param frameworks frameworks detectados * @param modules modulos detectados * @param javaVersion versao Java percebida * @param groupId groupId percebido */
+    public void registrarDependencySnapshot(JsonArray dependencies, JsonArray frameworks, JsonArray modules, String javaVersion, String groupId) {
         JsonObject root = jsonSupport.lerJson(memoryPaths.getDependencySnapshotFile());
 
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
         root.addProperty("projectRoot", normalizarCaminho(projectRootDirectory));
+        root.addProperty("javaVersion", valorSeguro(javaVersion));
+        root.addProperty("groupId", valorSeguro(groupId));
         root.addProperty("lastUpdatedAt", String.valueOf(System.currentTimeMillis()));
 
         if (dependencies != null) {
@@ -152,7 +243,7 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getDependencySnapshotFile(), root);
     }
 
-    /** * Registra historico compacto da ultima execucao de ferramenta. * * @param toolName nome da ferramenta * @param parametersSummary resumo dos parametros * @param resultSummary resumo do resultado * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Registra historico compacto da ultima execucao de ferramenta. * * @param toolName nome da ferramenta * @param parametersSummary resumo dos parametros * @param resultSummary resumo do resultado */
     public void registrarToolHistory(String toolName, String parametersSummary, String resultSummary) {
         JsonObject root = jsonSupport.lerJson(memoryPaths.getToolHistoryFile());
         JsonArray history;
@@ -179,7 +270,7 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getToolHistoryFile(), root);
     }
 
-    /** * Registra ou atualiza um pattern estrutural na memoria persistente. * * @param kind categoria do pattern * @param key chave do pattern * @param value valor do pattern * @param evidence evidencia resumida * @param confidence nivel de confianca * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Registra ou atualiza um pattern estrutural na memoria persistente. * * @param kind categoria do pattern * @param key chave do pattern * @param value valor do pattern * @param evidence evidencia resumida * @param confidence nivel de confianca */
     public void registrarPattern(String kind, String key, String value, String evidence, String confidence) {
         if (key == null || key.trim().length() == 0) {
             return;
@@ -208,17 +299,16 @@ public class ProjectMemoryStore {
         jsonSupport.gravarJson(memoryPaths.getDiscoveredPatternsFile(), root);
     }
 
-    /** * Retorna o resolver de caminhos da memoria persistente. * * @return paths da memoria persistente * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Retorna o resolver de caminhos da memoria persistente. * * @return paths da memoria persistente */
     public ProjectMemoryPaths getMemoryPaths() {
         return memoryPaths;
     }
 
-    /** * Retorna o diretorio de identidade efetivo usado por esta memoria. * * @return diretorio identidade do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Retorna o diretorio de identidade efetivo usado por esta memoria. * * @return diretorio identidade do projeto */
     public File getProjectRootDirectory() {
         return projectRootDirectory;
     }
 
-    /** * Garante a criacao inicial de um arquivo JSON quando ele ainda nao existir. * * @param arquivo arquivo alvo * @param conteudoInicial conteudo inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private void criarSeAusente(File arquivo, JsonObject conteudoInicial) {
         if (arquivo == null) {
             return;
@@ -229,7 +319,6 @@ public class ProjectMemoryStore {
         }
     }
 
-    /** * Cria o JSON inicial de memoria estrutural do projeto. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private JsonObject criarProjectMemoryInicial() {
         JsonObject root = new JsonObject();
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
@@ -245,7 +334,6 @@ public class ProjectMemoryStore {
         return root;
     }
 
-    /** * Cria o JSON inicial de historico de ferramentas. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private JsonObject criarToolHistoryInicial() {
         JsonObject root = new JsonObject();
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
@@ -253,10 +341,11 @@ public class ProjectMemoryStore {
         return root;
     }
 
-    /** * Cria o JSON inicial de snapshot de dependencias. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private JsonObject criarDependencySnapshotInicial() {
         JsonObject root = new JsonObject();
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
+        root.addProperty("javaVersion", "");
+        root.addProperty("groupId", "");
         root.add("dependencies", new JsonArray());
         root.add("frameworkHints", new JsonArray());
         root.add("modules", new JsonArray());
@@ -264,7 +353,6 @@ public class ProjectMemoryStore {
         return root;
     }
 
-    /** * Cria o JSON inicial de patterns descobertos. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private JsonObject criarDiscoveredPatternsInicial() {
         JsonObject root = new JsonObject();
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
@@ -273,7 +361,6 @@ public class ProjectMemoryStore {
         return root;
     }
 
-    /** * Cria o JSON inicial de branch context. * * @return objeto inicial * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private JsonObject criarBranchContextInicial() {
         JsonObject root = new JsonObject();
         root.addProperty("projectKey", gerarProjectKey(projectRootDirectory));
@@ -285,7 +372,6 @@ public class ProjectMemoryStore {
         return root;
     }
 
-    /** * Remove um pattern de uma lista JSON pelo valor da chave. * * @param lista lista JSON * @param chave chave do pattern * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private void removerPadraoDaLista(JsonArray lista, String chave) {
         if (lista == null || chave == null) {
             return;
@@ -300,7 +386,6 @@ public class ProjectMemoryStore {
         }
     }
 
-    /** * Atualiza ou insere um pattern em uma lista JSON. * * @param lista lista alvo * @param kind categoria * @param key chave * @param value valor * @param evidence evidencia * @param confidence nivel de confianca * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private void atualizarOuInserirPadrao(JsonArray lista, String kind, String key, String value, String evidence, String confidence) {
         boolean atualizado = false;
 
@@ -339,7 +424,6 @@ public class ProjectMemoryStore {
         }
     }
 
-    /** * Detecta a branch atual subindo a arvore a partir do diretorio identidade * ate encontrar um `.git/HEAD`. * * @return branch atual ou string vazia * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String detectarBranchAtual() {
         if (projectRootDirectory == null) {
             return "";
@@ -382,7 +466,6 @@ public class ProjectMemoryStore {
         return "";
     }
 
-    /** * Resolve o diretorio de identidade do projeto, priorizando o `.project` * mais proximo e depois o `pom.xml` mais proximo. * * @param originalRoot raiz original recebida * @return diretorio identidade mais estavel para memoria persistente * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private File resolverDiretorioIdentidade(File originalRoot) {
         if (originalRoot == null) {
             return null;
@@ -406,7 +489,6 @@ public class ProjectMemoryStore {
         return originalRoot;
     }
 
-    /** * Localiza o `.project` mais proximo subindo a arvore. * * @param start ponto inicial * @return diretorio contendo `.project` ou null * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private File localizarProjectRootMaisProximo(File start) {
         File cursor = start;
 
@@ -422,7 +504,6 @@ public class ProjectMemoryStore {
         return null;
     }
 
-    /** * Localiza o modulo Maven mais proximo subindo a arvore. * * @param start ponto inicial * @return diretorio contendo `pom.xml` ou null * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private File localizarModuloMavenMaisProximo(File start) {
         File cursor = start;
 
@@ -438,7 +519,6 @@ public class ProjectMemoryStore {
         return null;
     }
 
-    /** * Gera a chave estavel do projeto a partir do diretorio identidade. * * @param rootDirectory diretorio identidade * @return chave estavel do projeto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarProjectKey(File rootDirectory) {
         if (rootDirectory == null) {
             return "unknown_project";
@@ -454,7 +534,6 @@ public class ProjectMemoryStore {
         }
     }
 
-    /** * Gera hash curto deterministico. * * @param valor valor base * @return hash curto * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String gerarHashCurto(String valor) {
         try {
             MessageDigest messageDigest = MessageDigest.getInstance("MD5");
@@ -475,7 +554,109 @@ public class ProjectMemoryStore {
         }
     }
 
-    /** * Normaliza nome para uso em chave persistente. * * @param nome nome original * @return nome normalizado * * @author Renato Tomaz Nati * @since 2026-05-20 */
+
+    /**
+     * Registra um padrao estrutural estavel descoberto automaticamente.
+     *
+     * @param path caminho relativo usado pela ferramenta
+     * @param kind categoria do padrao
+     * @param key chave do padrao
+     * @param value valor detectado
+     * @param evidence evidencia resumida
+     * @param confidence confianca numerica
+     */
+    public void recordStablePattern(String path, String kind, String key, String value, String evidence, double confidence) {
+        String confidenceText = confidence >= 0.80d ? "alta" : "media";
+        StringBuilder evidenceBuilder = new StringBuilder();
+
+        if (evidence != null && evidence.trim().length() > 0) {
+            evidenceBuilder.append(evidence.trim());
+        }
+        if (path != null && path.trim().length() > 0) {
+            if (evidenceBuilder.length() > 0) {
+                evidenceBuilder.append(" | ");
+            }
+            evidenceBuilder.append("path=").append(path.trim());
+        }
+
+        registrarPattern(kind, key, value, evidenceBuilder.toString(), confidenceText);
+    }
+
+    /**
+     * Persiste o resultado resumido de agent tools de analise em JSONL.
+     *
+     * @param toolName nome da ferramenta
+     * @param parametersJson parametros em JSON
+     * @param resultText resultado bruto ou resumido
+     */
+    public void registrarAgentToolAnalise(String toolName, String parametersJson, String resultText) {
+        if (toolName == null || toolName.trim().length() == 0) {
+            return;
+        }
+
+        try {
+            File memoryDir = memoryPaths.getProjectDirectory();
+            if (!memoryDir.exists()) {
+                memoryDir.mkdirs();
+            }
+
+            File history = new File(memoryDir, "agent-tools-analysis.jsonl");
+            String resumo = resumirTexto(resultText, 1200);
+            String registro = "{"
+                    + "\"timestamp\":\"" + escapeJson(new Date().toString()) + "\","
+                    + "\"projectRoot\":\"" + escapeJson(normalizarCaminho(projectRootDirectory)) + "\","
+                    + "\"tool\":\"" + escapeJson(toolName) + "\","
+                    + "\"parameters\":" + normalizarJsonObjeto(parametersJson) + ","
+                    + "\"resultSummary\":\"" + escapeJson(resumo) + "\""
+                    + "}" + System.lineSeparator();
+
+            FileWriter writer = new FileWriter(history, true);
+            try {
+                writer.write(registro);
+            } finally {
+                writer.close();
+            }
+
+            System.out.println("[MCP MEMORY DEBUG] agentToolAnalysis.persisted=true | file="
+                    + history.getAbsolutePath() + " | tool=" + toolName);
+        } catch (Exception e) {
+            System.out.println("[MCP MEMORY DEBUG] agentToolAnalysis.persisted=false | tool="
+                    + toolName + " | error=" + e.getMessage());
+        }
+    }
+
+    private static String normalizarJsonObjeto(String json) {
+        if (json == null) {
+            return "{}";
+        }
+        String trimmed = json.trim();
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            return trimmed;
+        }
+        return "{\"raw\":\"" + escapeJson(trimmed) + "\"}";
+    }
+
+    private static String resumirTexto(String texto, int limite) {
+        if (texto == null) {
+            return "";
+        }
+        String normalizado = texto.replace('\r', ' ').replace('\n', ' ').trim();
+        if (normalizado.length() <= limite) {
+            return normalizado;
+        }
+        return normalizado.substring(0, limite) + "...";
+    }
+
+    private static String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", " ")
+                .replace("\n", " ");
+    }
+
     private String normalizarNome(String nome) {
         if (nome == null || nome.trim().length() == 0) {
             return "project";
@@ -486,7 +667,6 @@ public class ProjectMemoryStore {
         return normalizado;
     }
 
-    /** * Converte arquivo em caminho normalizado. * * @param arquivo arquivo alvo * @return caminho normalizado * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String normalizarCaminho(File arquivo) {
         if (arquivo == null) {
             return "";
@@ -499,7 +679,6 @@ public class ProjectMemoryStore {
         }
     }
 
-    /** * Retorna valor seguro nao nulo. * * @param valor valor original * @return valor seguro * * @author Renato Tomaz Nati * @since 2026-05-20 */
     private String valorSeguro(String valor) {
         if (valor == null) {
             return "";

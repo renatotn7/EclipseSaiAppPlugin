@@ -4,14 +4,16 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mcp.sailibrary.plugin.mcp.McpResponseExtractor;
+import com.mcp.sailibrary.plugin.mcp.core.ModelChannel;
+import com.mcp.sailibrary.plugin.mcp.core.ModelExecutionProfile;
+import com.mcp.sailibrary.plugin.mcp.core.ModelExecutionResponse;
 import com.mcp.sailibrary.plugin.mcp.multimodel.gateway.UnifiedMcpModelGateway;
-import com.mcp.sailibrary.plugin.mcp.multimodel.routing.DefaultMcpModelNameResolver;
 import com.mcp.sailibrary.plugin.mcp.multimodel.routing.ModelNameResolver;
 import com.mcp.sailibrary.plugin.mcp.multimodel.routing.PropertiesBackedMcpModelNameResolver;
 
-/* --- version: "1.5" libraries: - McpResponseExtractor - UnifiedMcpModelGateway - DefaultMcpModelNameResolver - ModelNameResolver - PropertiesBackedMcpModelNameResolver - CodeAuditPromptBuilder - CodeAuditResult - CodeAuditService - AuditExecutionStatus - AuditObservationLevel objetivo: "Executar auditoria remota de codigo separando falha tecnica do auditor de reprovacao real do codigo, aceitando multiplos formatos validos de resposta e registrando observacoes semanticas sem contaminar o status operacional." --- */
+/* --- version: "2.0" libraries: - McpResponseExtractor - UnifiedMcpModelGateway - CodeAuditPromptBuilder - CodeAuditResult - AuditExecutionStatus - AuditObservationLevel objetivo: "Executar auditoria por canal cognitivo CODE_AUDITOR, suportando legacy ou streaming sem alterar a classe." --- */
 
-/** * Implementacao de auditoria de codigo baseada em modelo externo. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+/** * Implementacao de auditoria de codigo baseada em modelo externo. * * @author Renato Tomaz Nati * @since 2026-05-26 */
 public class ClaudeCodeAuditService implements CodeAuditService {
 
     private ModelNameResolver modelNameResolver;
@@ -30,9 +32,11 @@ public class ClaudeCodeAuditService implements CodeAuditService {
 
     public ClaudeCodeAuditService(ModelNameResolver modelNameResolver, UnifiedMcpModelGateway unifiedMcpModelGateway, McpResponseExtractor mcpResponseExtractor, CodeAuditPromptBuilder codeAuditPromptBuilder) {
         this.modelNameResolver = modelNameResolver;
-        this.unifiedMcpModelGateway = unifiedMcpModelGateway;
-        this.mcpResponseExtractor = mcpResponseExtractor;
-        this.codeAuditPromptBuilder = codeAuditPromptBuilder;
+        this.unifiedMcpModelGateway = unifiedMcpModelGateway != null
+                ? unifiedMcpModelGateway
+                : new UnifiedMcpModelGateway(UnifiedMcpModelGateway.DEFAULT_MCP_API_URL);
+        this.mcpResponseExtractor = mcpResponseExtractor != null ? mcpResponseExtractor : new McpResponseExtractor();
+        this.codeAuditPromptBuilder = codeAuditPromptBuilder != null ? codeAuditPromptBuilder : new CodeAuditPromptBuilder();
     }
 
     @Override
@@ -45,21 +49,41 @@ public class ClaudeCodeAuditService implements CodeAuditService {
                 actionEsperada
         );
 
-        String modelName = resolveCodeAuditorModelNameSeguro();
+        ModelExecutionProfile profile = unifiedMcpModelGateway.resolveProfile(ModelChannel.CODE_AUDITOR);
 
         System.out.println("[MCP DEBUG] ClaudeCodeAuditService");
-        System.out.println("[MCP DEBUG] modelName=" + modelName);
+        System.out.println("[MCP DEBUG] transport=" + profile.getTransportKind());
+        System.out.println("[MCP DEBUG] requestFormat=" + profile.getRequestFormatKind());
+        System.out.println("[MCP DEBUG] responseFormat=" + profile.getResponseFormatKind());
+        System.out.println("[MCP DEBUG] model=" + profile.resolveEffectiveModelName());
+        System.out.println("[MCP DEBUG] modelDisplayName=" + formatModelForLog(profile.getLegacyModelAlias(), profile.getStreamingModelName()));
         System.out.println("[MCP DEBUG] actionEsperada=" + actionEsperada);
         System.out.println("[MCP DEBUG] promptLength=" + promptAuditoria.length());
         System.out.println("[MCP DEBUG] pedidoOriginal=" + truncateForDebug(pedidoOriginal, 1200));
         System.out.println("[MCP DEBUG] planoImplementacao=" + truncateForDebug(planoImplementacao, 2500));
         System.out.println("[MCP DEBUG] codigoCandidato=" + truncateForDebug(codigoCandidato, 2500));
 
-        String rawResponse = unifiedMcpModelGateway.callModel(modelName, promptAuditoria, apiKey);
+        ModelExecutionResponse executionResponse = unifiedMcpModelGateway.executeCodeAuditorPrompt(promptAuditoria, apiKey);
+
+        if (executionResponse == null) {
+            CodeAuditResult result = new CodeAuditResult();
+            result.setAprovado(false);
+            result.setDeveTentarNovamente(false);
+            result.setNivelRisco("INDEFINIDO");
+            result.setObservationLevel(AuditObservationLevel.NENHUM);
+            result.setExecutionStatus(AuditExecutionStatus.FALHA_INFRA);
+            result.setFeedback("Falha tecnica ao executar o canal CODE_AUDITOR. Nenhuma resposta foi retornada pelo gateway.");
+            return result;
+        }
+
+        String rawResponse = executionResponse.getRawResponseBody();
+        String textResponse = executionResponse.getPrimaryText();
 
         System.out.println("[MCP DEBUG] rawResponse=" + truncateForDebug(rawResponse, 3000));
 
-        String textResponse = mcpResponseExtractor.extractPrimaryText(rawResponse);
+        if (textResponse == null || textResponse.trim().length() == 0) {
+            textResponse = mcpResponseExtractor.extractPrimaryText(rawResponse);
+        }
 
         System.out.println("[MCP DEBUG] textResponse=" + truncateForDebug(textResponse, 3000));
 
@@ -153,7 +177,6 @@ public class ClaudeCodeAuditService implements CodeAuditService {
         }
     }
 
-    /** * Caller: parseAuditResult * Callee: JsonParser * Objetivo: Aceitar multiplos formatos validos de retorno do auditor. * Data modificacao: 2026-05-25 * * @param textoNormalizado texto bruto ja sem cercas markdown * @return json final contendo approved, shouldRetry, riskLevel e feedback */
     private JsonObject extractAuditDecisionJson(String textoNormalizado) {
         if (isBlank(textoNormalizado)) {
             return null;
@@ -476,23 +499,6 @@ public class ClaudeCodeAuditService implements CodeAuditService {
                 || texto.contains("template usage limit exceeded");
     }
 
-    private String resolveCodeAuditorModelNameSeguro() {
-        ModelNameResolver resolverEfetivo = modelNameResolver;
-        if (resolverEfetivo == null) {
-            System.out.println("[MCP CONFIG DEBUG] ModelNameResolver nulo no ClaudeCodeAuditService. Usando resolver default.");
-            resolverEfetivo = new DefaultMcpModelNameResolver();
-        }
-
-        String modelName = resolverEfetivo.resolveCodeAuditorModelName();
-        if (isBlank(modelName)) {
-            System.out.println("[MCP CONFIG DEBUG] resolveCodeAuditorModelName vazio no ClaudeCodeAuditService. Usando fallback do resolver default.");
-            modelName = new DefaultMcpModelNameResolver().resolveCodeAuditorModelName();
-        }
-
-        System.out.println("[MCP CONFIG DEBUG] ClaudeCodeAuditService usando model=[" + modelName + "]");
-        return modelName;
-    }
-
     private String truncateForDebug(String value, int max) {
         if (value == null) {
             return "null";
@@ -516,4 +522,54 @@ public class ClaudeCodeAuditService implements CodeAuditService {
     private boolean isBlank(String value) {
         return value == null || value.trim().length() == 0;
     }
+    private String formatModelForLog(String legacyAlias, String streamingModelName) {
+        String alias = safeTrim(legacyAlias);
+        String streaming = safeTrim(streamingModelName);
+        String semantic = resolveSemanticModelAlias(alias, streaming);
+
+        StringBuilder builder = new StringBuilder();
+        if (!isBlank(alias)) {
+            builder.append(alias);
+        }
+        if (!isBlank(semantic) && !semantic.equals(alias)) {
+            if (builder.length() > 0) {
+                builder.append(" | ");
+            }
+            builder.append(semantic);
+        }
+        if (!isBlank(streaming) && !streaming.equals(alias) && !streaming.equals(semantic)) {
+            if (builder.length() > 0) {
+                builder.append(" | ");
+            }
+            builder.append(streaming);
+        }
+        return builder.length() > 0 ? builder.toString() : "desconhecido";
+    }
+
+    private String resolveSemanticModelAlias(String legacyAlias, String streamingModelName) {
+        String alias = safeTrim(legacyAlias).toUpperCase();
+        String streaming = safeTrim(streamingModelName).toLowerCase();
+
+        if (alias.contains("GPT54") || streaming.contains("5.4")) {
+            return "gpt5ponto4";
+        }
+        if (alias.contains("GPT52") || streaming.contains("5.2")) {
+            return "gpt5ponto2";
+        }
+        if (alias.contains("GPT5") || streaming.contains("gpt-5")) {
+            return "gpt5";
+        }
+        if (alias.contains("O3") || streaming.contains("o3")) {
+            return "o3";
+        }
+        if (alias.contains("CLAUDE") || streaming.contains("claude")) {
+            return "claude";
+        }
+        if (!isBlank(alias)) {
+            return alias.toLowerCase();
+        }
+        return streaming;
+    }
+
+
 }

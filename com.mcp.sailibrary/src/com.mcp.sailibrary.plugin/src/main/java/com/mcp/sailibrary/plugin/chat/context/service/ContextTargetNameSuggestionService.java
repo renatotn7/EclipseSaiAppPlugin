@@ -6,7 +6,7 @@ import com.mcp.sailibrary.plugin.chat.context.model.NamedContextTargetRole;
 import com.mcp.sailibrary.plugin.chat.context.model.NamedStructuralContextType;
 import com.mcp.sailibrary.plugin.mcp.SaiLibraryMcpClient;
 
-/* yaml_header: version: "1.0" purpose: "Sugerir nomes curtos para alvos estruturais usando IA com fallback local seguro." libraries: - com.mcp.sailibrary.plugin.SaiLibraryMcpClient: projeto */
+/* yaml_header: version: "1.1" purpose: "Sugerir nomes curtos para alvos estruturais usando canal CONTEXT_NAMING com fallback local seguro." libraries: - com.mcp.sailibrary.plugin.SaiLibraryMcpClient: projeto */
 public class ContextTargetNameSuggestionService {
 
     private final ContextTargetNameGenerator fallbackGenerator;
@@ -29,7 +29,16 @@ public class ContextTargetNameSuggestionService {
                         apiKey
                 );
 
+                if (isInfrastructureFailure(rawResponse)) {
+                    return fallbackGenerator.generateName(selectedText, role, type, fileName, packageName, existingNames);
+                }
+
                 String suggestedName = SaiLibraryMcpClient.extractSuggestedBlockName(rawResponse);
+
+                if (isInfrastructureFailure(suggestedName)) {
+                    return fallbackGenerator.generateName(selectedText, role, type, fileName, packageName, existingNames);
+                }
+
                 suggestedName = sanitizeSuggestedName(suggestedName);
 
                 if (isUsableName(suggestedName)) {
@@ -42,7 +51,32 @@ public class ContextTargetNameSuggestionService {
 
         return fallbackGenerator.generateName(selectedText, role, type, fileName, packageName, existingNames);
     }
+    private boolean isInfrastructureFailure(String value) {
+        if (value == null) {
+            return false;
+        }
 
+        String normalized = value.trim().toLowerCase();
+
+        if (normalized.length() == 0) {
+            return false;
+        }
+
+        return normalized.contains("access denied")
+                || normalized.contains("unauthorized")
+                || normalized.contains("forbidden")
+                || normalized.contains("not in your favourites")
+                || normalized.contains("not its owner")
+                || normalized.contains("tool is not")
+                || normalized.contains("erro operacional")
+                || normalized.contains("falha")
+                || normalized.contains("exception")
+                || normalized.contains("http 302")
+                || normalized.contains("http 401")
+                || normalized.contains("http 403")
+                || normalized.contains("login")
+                || normalized.contains("redirect");
+    }
     private String buildKindText(NamedContextTargetRole role, NamedStructuralContextType type, String fileName, String packageName) {
         StringBuilder sb = new StringBuilder();
         sb.append("role=").append(role != null ? role.name() : "");
@@ -117,7 +151,21 @@ public class ContextTargetNameSuggestionService {
                 || "find".equals(value)
                 || "load".equals(value)
                 || "build".equals(value)
-                || "create".equals(value)) {
+                || "create".equals(value)
+                || "access".equals(value)
+                || "denied".equals(value)
+                || "accessdenied".equals(value)
+                || "error".equals(value)
+                || "erro".equals(value)
+                || "falha".equals(value)
+                || "failure".equals(value)
+                || "forbidden".equals(value)
+                || "unauthorized".equals(value)
+                || "undefined".equals(value)
+                || "unknown".equals(value)
+                || "owner".equals(value)
+                || "favourites".equals(value)
+                || "favorite".equals(value)) {
             return false;
         }
 

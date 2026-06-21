@@ -15,6 +15,7 @@ import org.junit.rules.TemporaryFolder;
 import com.mcp.sailibrary.plugin.agent.tools.memory.ProjectMemoryQueryTool;
 import com.mcp.sailibrary.plugin.agent.tools.memory.ProjectMemoryWriteTool;
 
+/** * Testes de unidade da ferramenta de leitura da memoria persistente do projeto. * * <p>Os testes usam user.home e workspace isolados para evitar poluicao do * ambiente local do desenvolvedor.</p> * * @author Renato Tomaz Nati */
 public class ProjectMemoryQueryToolTest {
 
     @Rule
@@ -28,11 +29,12 @@ public class ProjectMemoryQueryToolTest {
     @Before
     public void setUp() throws Exception {
         originalUserHome = System.getProperty("user.home");
+
         File mockHome = tempFolder.newFolder("mock_home");
         System.setProperty("user.home", mockHome.getAbsolutePath());
 
         mockWorkspaceRoot = tempFolder.newFolder("mock_workspace");
-        
+
         queryTool = new ProjectMemoryQueryTool(mockWorkspaceRoot);
         writeTool = new ProjectMemoryWriteTool(mockWorkspaceRoot);
     }
@@ -47,7 +49,6 @@ public class ProjectMemoryQueryToolTest {
     @Test
     public void testMetadataDaFerramenta() {
         assertEquals("consultar_memoria_projeto", queryTool.getName());
-      //  assertNotNull(queryTool.getDescription());
         assertNotNull(queryTool.getPromptMetadata());
     }
 
@@ -55,16 +56,22 @@ public class ProjectMemoryQueryToolTest {
     public void testLeituraResumoVazio() {
         String json = "{\"tipo\":\"resumo\"}";
         String resultado = queryTool.execute(json);
-        assertTrue(resultado.contains("Resumo da memoria persistente"));
+
+        assertTrue("O resumo deveria conter o cabecalho padrao. Recebido: " + resultado,
+                resultado.contains("Resumo da memoria persistente do projeto"));
+        assertTrue("O resumo deveria conter o diretorio do projeto. Recebido: " + resultado,
+                resultado.contains("Diretorio: "));
     }
 
     @Test
     public void testLeituraFallbackParaResumoSemTipo() {
         String resultadoVazio = queryTool.execute("{}");
-        assertTrue(resultadoVazio.contains("Resumo da memoria persistente"));
-        
+        assertTrue("Sem tipo, a consulta deveria cair para resumo. Recebido: " + resultadoVazio,
+                resultadoVazio.contains("Resumo da memoria persistente do projeto"));
+
         String resultadoMalFormado = queryTool.execute("IstoNaoEJSON");
-        assertTrue(resultadoMalFormado.contains("Resumo da memoria persistente"));
+        assertTrue("JSON mal formado deveria cair para resumo. Recebido: " + resultadoMalFormado,
+                resultadoMalFormado.contains("Resumo da memoria persistente do projeto"));
     }
 
     @Test
@@ -75,7 +82,6 @@ public class ProjectMemoryQueryToolTest {
 
         String resultado = queryTool.execute("{\"tipo\":\"resumo\"}");
 
-        // Removidas as aspas da validacao, pois getAsString() extrai os valores limpos
         assertTrue("Faltou 'master' no resumo: " + resultado, resultado.contains("master"));
         assertTrue("Faltou '21' no resumo: " + resultado, resultado.contains("21"));
         assertTrue("Faltou 'com.mcp' no resumo: " + resultado, resultado.contains("com.mcp"));
@@ -88,7 +94,7 @@ public class ProjectMemoryQueryToolTest {
         writeTool.execute("{\"modo\":\"tool_history\", \"tool\":\"GitTool\", \"parametersSummary\":\"commit\", \"resultSummary\":\"sucesso\"}");
 
         String resultado = queryTool.execute("{\"tipo\":\"tool_history\"}");
-        
+
         assertTrue("Faltou 'GitTool' no historico: " + resultado, resultado.contains("GitTool"));
         assertTrue("Faltou 'commit' no historico: " + resultado, resultado.contains("commit"));
         assertTrue("Faltou 'sucesso' no historico: " + resultado, resultado.contains("sucesso"));

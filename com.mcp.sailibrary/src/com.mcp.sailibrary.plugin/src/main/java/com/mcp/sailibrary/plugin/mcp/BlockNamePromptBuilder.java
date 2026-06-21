@@ -1,13 +1,13 @@
 package com.mcp.sailibrary.plugin.mcp;
 
-/** * Monta o prompt especifico para sugestao de nome curto de bloco ou contexto. * * @author Renato Tomaz Nati * @since 2026-05-20 */
+/** * Monta o prompt especifico para sugestao de nome curto de bloco ou contexto. * * <p>Esta classe e intencionalmente pura: nao conhece transporte, modelo, * endpoint, cookies, api key nem formato de resposta.</p> * * @author Renato Tomaz Nati * @since 2026-05-26 */
 public class BlockNamePromptBuilder {
 
-    /** * Construi o prompt textual de sugestao de nome curto. * * @param selectedCode trecho selecionado * @param kind tipo logico do bloco * @param existingNames nomes ja existentes na sessao * @return prompt final * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Construi o prompt textual de sugestao de nome curto. * * @param selectedCode trecho selecionado * @param kind tipo logico do bloco * @param existingNames nomes ja existentes na sessao * @return prompt final */
     public String build(String selectedCode, String kind, String existingNames) {
-        String safeText = selectedCode != null ? selectedCode : "";
-        String safeKind = kind != null ? kind : "";
-        String safeExistingNames = existingNames != null ? existingNames : "";
+        String safeText = safe(selectedCode);
+        String safeKind = safe(kind);
+        String safeExistingNames = safe(existingNames);
 
         return "Voce deve gerar um nome curto para um alvo de contexto selecionado.\n"
                 + "REGRAS OBRIGATORIAS:\n"
@@ -28,5 +28,9 @@ public class BlockNamePromptBuilder {
                 + "NOMES JA EXISTENTES: " + safeExistingNames + "\n"
                 + "\nTRECHO SELECIONADO:\n"
                 + safeText + "\n";
+    }
+
+    private String safe(String value) {
+        return value != null ? value : "";
     }
 }

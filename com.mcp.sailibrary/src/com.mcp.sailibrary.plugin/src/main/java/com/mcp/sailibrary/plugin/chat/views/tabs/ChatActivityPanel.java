@@ -73,13 +73,35 @@ public class ChatActivityPanel extends Composite {
             return;
         }
 
-        atividadeAgenteText.setText(activityController != null ? activityController.renderizarTextoAtividade() : "");
-        atividadeAgenteText.setTopIndex(atividadeAgenteText.getLineCount() - 1);
+        String textoAtividade = activityController != null ? activityController.renderizarTextoAtividade() : "";
+        atividadeAgenteText.setText(limitarTextoAtividade(textoAtividade));
+
+        int ultimaLinha = atividadeAgenteText.getLineCount() - 1;
+        if (ultimaLinha < 0) {
+            ultimaLinha = 0;
+        }
+        atividadeAgenteText.setTopIndex(ultimaLinha);
 
         if (atividadeStatusLabel != null && !atividadeStatusLabel.isDisposed()) {
             atividadeStatusLabel.setText(activityController != null
                     ? activityController.getMensagemStatus()
                     : "Sem atividade em andamento.");
         }
+    }
+    private String limitarTextoAtividade(String textoOriginal) {
+        if (textoOriginal == null) {
+            return "";
+        }
+
+        int limite = 120000;
+        if (textoOriginal.length() <= limite) {
+            return textoOriginal;
+        }
+
+        StringBuilder builder = new StringBuilder();
+        builder.append("[ATIVIDADE]: Historico truncado para preservar fluidez da aba.");
+        builder.append(System.lineSeparator());
+        builder.append(textoOriginal.substring(textoOriginal.length() - limite));
+        return builder.toString();
     }
 }

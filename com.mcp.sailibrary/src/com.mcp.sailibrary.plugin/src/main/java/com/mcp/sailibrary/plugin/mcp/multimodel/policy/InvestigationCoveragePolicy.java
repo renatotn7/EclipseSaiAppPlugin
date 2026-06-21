@@ -136,6 +136,17 @@ public class InvestigationCoveragePolicy {
         public void setUmNivelAbaixoResolvido(boolean umNivelAbaixoResolvido) {
             this.umNivelAbaixoResolvido = umNivelAbaixoResolvido;
         }
+
+        public boolean isActive() {
+            return requerContextoProjeto
+                    || requerImpacto
+                    || requerImplementacaoConcreta
+                    || requerCallees
+                    || requerEfeitosColaterais
+                    || requerQueries
+                    || requerUmNivelAbaixo;
+        }
+
     }
 
     public CoveragePlan createPlan(String perfilRaciocinio, String pedidoOriginal) {
@@ -145,6 +156,15 @@ public class InvestigationCoveragePolicy {
 
         plan.setRequerContextoProjeto(true);
 
+        
+        boolean pedidoSomenteValidacaoSemMutacao = contemTermo(pedido, "validacao")
+                && (contemTermo(pedido, "sem alterar")
+                    || contemTermo(pedido, "nao altere")
+                    || contemTermo(pedido, "nao alterar")
+                    || contemTermo(pedido, "sem mutacao")
+                    || contemTermo(pedido, "nao crie")
+                    || contemTermo(pedido, "nao apague"));
+        
         boolean pedidoMutacaoOuSeguranca = contemTermo(pedido, "seguranca")
                 || contemTermo(pedido, "ajusta")
                 || contemTermo(pedido, "altera")
@@ -166,7 +186,7 @@ public class InvestigationCoveragePolicy {
                 || contemTermo(pedido, "banco");
 
         if (ChatRuntimeSettings.PERFIL_PADRAO.equals(perfilNormalizado)) {
-            if (pedidoMutacaoOuSeguranca) {
+        	 if (pedidoMutacaoOuSeguranca && !pedidoSomenteValidacaoSemMutacao) {
                 plan.setRequerImpacto(true);
             }
             return plan;
@@ -215,7 +235,14 @@ public class InvestigationCoveragePolicy {
             return;
         }
 
-        if ("consultar_memoria_projeto".equals(toolName) || "inspecionar_dependencias_projeto".equals(toolName) || "verificar_raiz_projeto".equals(toolName) || "registrar_memoria_projeto".equals(toolName)) {
+        registrarCoberturaPorFerramenta(plan, toolName);
+    }
+
+    private void registrarCoberturaPorFerramenta(CoveragePlan plan, String toolName) {
+        if ("consultar_memoria_projeto".equals(toolName)
+                || "inspecionar_dependencias_projeto".equals(toolName)
+                || "verificar_raiz_projeto".equals(toolName)
+                || "registrar_memoria_projeto".equals(toolName)) {
             plan.setContextoProjetoResolvido(true);
         }
 
@@ -239,9 +266,81 @@ public class InvestigationCoveragePolicy {
             plan.setQueriesResolvidas(true);
         }
 
-        if ("ler_conteudo_arquivo".equals(toolName) || "leitura_cirurgica_jdt".equals(toolName) || "buscar_contexto_jdt".equals(toolName)) {
+        if ("ler_conteudo_arquivo".equals(toolName)
+                || "leitura_cirurgica_jdt".equals(toolName)
+                || "buscar_contexto_jdt".equals(toolName)) {
             plan.setUmNivelAbaixoResolvido(true);
         }
+    }
+
+    private boolean resultadoIndicaFalha(String toolResult) {
+        String texto = toolResult != null ? toolResult.trim().toLowerCase() : "";
+
+        if (texto.length() == 0) {
+            return true;
+        }
+
+        if (texto.startsWith("erro operacional:")) {
+            return true;
+        }
+
+        if (texto.startsWith("erro:")) {
+            return true;
+        }
+
+        if (texto.startsWith("[erro]")) {
+            return true;
+        }
+
+        if (texto.startsWith("falha operacional:")) {
+            return true;
+        }
+
+        if (texto.startsWith("falha tecnica:")) {
+            return true;
+        }
+
+        if (texto.contains("erro operacional:")) {
+            return true;
+        }
+
+        if (texto.contains("erro ao executar ferramenta")) {
+            return true;
+        }
+
+        if (texto.contains("falha ao executar ferramenta")) {
+            return true;
+        }
+
+        if (texto.contains("tool execution failed")) {
+            return true;
+        }
+
+        if (texto.contains("access denied")) {
+            return true;
+        }
+
+        if (texto.contains("permission denied")) {
+            return true;
+        }
+
+        if (texto.contains("connection refused")) {
+            return true;
+        }
+
+        if (texto.contains("connection reset")) {
+            return true;
+        }
+
+        if (texto.contains("read timed out")) {
+            return true;
+        }
+
+        if (texto.contains("socket timeout")) {
+            return true;
+        }
+
+        return false;
     }
 
     public boolean podeConcluir(CoveragePlan plan) {
@@ -350,15 +449,6 @@ public class InvestigationCoveragePolicy {
         return builder.toString();
     }
 
-    private boolean resultadoIndicaFalha(String toolResult) {
-        String texto = toolResult != null ? toolResult.toLowerCase() : "";
-        return texto.contains("erro operacional")
-                || texto.contains("nao foi possivel")
-                || texto.contains("exception")
-                || texto.contains("falha")
-                || texto.contains("access denied")
-                || texto.contains("timeout");
-    }
 
     private boolean contemTermo(String texto, String termo) {
         return texto != null && texto.contains(termo);

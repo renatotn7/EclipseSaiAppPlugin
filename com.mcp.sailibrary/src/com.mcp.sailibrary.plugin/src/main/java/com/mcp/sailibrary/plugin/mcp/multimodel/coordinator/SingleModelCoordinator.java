@@ -12,14 +12,17 @@ import com.mcp.sailibrary.plugin.chat.service.McpAgentResponseService;
 import com.mcp.sailibrary.plugin.chat.support.AiResponse;
 import com.mcp.sailibrary.plugin.mcp.DesenvolvimentoPromptBuilder;
 import com.mcp.sailibrary.plugin.mcp.McpResponseExtractor;
+import com.mcp.sailibrary.plugin.mcp.core.ModelChannel;
+import com.mcp.sailibrary.plugin.mcp.core.ModelExecutionProfile;
+import com.mcp.sailibrary.plugin.mcp.core.ModelExecutionResponse;
+import com.mcp.sailibrary.plugin.mcp.core.StructuralContextDetector;
 import com.mcp.sailibrary.plugin.mcp.multimodel.gateway.UnifiedMcpModelGateway;
-import com.mcp.sailibrary.plugin.mcp.multimodel.routing.DefaultMcpModelNameResolver;
 import com.mcp.sailibrary.plugin.mcp.multimodel.routing.ModelNameResolver;
 import com.mcp.sailibrary.plugin.mcp.multimodel.routing.PropertiesBackedMcpModelNameResolver;
 
-/* --- version: "1.2" libraries: - File - List - ResourcesPlugin - AgentTool - AgentToolRegistryFactory - AgentToolPromptSectionBuilder - McpAgentResponseService - AiResponse - DesenvolvimentoPromptBuilder - McpResponseExtractor - UnifiedMcpModelGateway - DefaultMcpModelNameResolver - ModelNameResolver objetivo: "Preservar o fluxo monomodelo atual do plugin usando componentes desacoplados para prompt, transporte MCP e parse da resposta, distinguindo falha de infraestrutura de resposta valida da IA." --- */
+/* --- version: "2.0" libraries: - File - List - ResourcesPlugin - AgentTool - AgentToolRegistryFactory - AgentToolPromptSectionBuilder - McpAgentResponseService - AiResponse - DesenvolvimentoPromptBuilder - McpResponseExtractor - UnifiedMcpModelGateway - StructuralContextDetector objetivo: "Preservar o fluxo monomodelo atual, agora suportando transporte legacy ou streaming por configuracao de canal." --- */
 
-/** * Coordenador compativel com a estrategia atual de um unico modelo. * * @author Renato Tomaz Nati * @since 2026-05-24 */
+/** * Coordenador compativel com a estrategia atual de um unico modelo. * * <p>Agora o planner pode ser legado ou streaming sem alterar esta classe. * A decisao fica no profile do canal PLANNER.</p> * * @author Renato Tomaz Nati * @since 2026-05-26 */
 public class SingleModelCoordinator implements AgentModelCoordinator {
 
     private ModelNameResolver modelNameResolver;
@@ -28,6 +31,8 @@ public class SingleModelCoordinator implements AgentModelCoordinator {
     private McpAgentResponseService mcpAgentResponseService;
     private DesenvolvimentoPromptBuilder desenvolvimentoPromptBuilder;
     private AgentToolPromptSectionBuilder agentToolPromptSectionBuilder;
+    private StructuralContextDetector structuralContextDetector;
+    private ModelChannel modelChannel;
 
     public SingleModelCoordinator() {
         this(
@@ -36,17 +41,53 @@ public class SingleModelCoordinator implements AgentModelCoordinator {
                 new McpResponseExtractor(),
                 new McpAgentResponseService(),
                 new DesenvolvimentoPromptBuilder(),
-                new AgentToolPromptSectionBuilder()
+                new AgentToolPromptSectionBuilder(),
+                new StructuralContextDetector(),
+                ModelChannel.PLANNER
+        );
+    }
+
+    public SingleModelCoordinator(ModelChannel modelChannel) {
+        this(
+                new PropertiesBackedMcpModelNameResolver(),
+                new UnifiedMcpModelGateway(UnifiedMcpModelGateway.DEFAULT_MCP_API_URL),
+                new McpResponseExtractor(),
+                new McpAgentResponseService(),
+                new DesenvolvimentoPromptBuilder(),
+                new AgentToolPromptSectionBuilder(),
+                new StructuralContextDetector(),
+                modelChannel
         );
     }
 
     public SingleModelCoordinator(ModelNameResolver modelNameResolver, UnifiedMcpModelGateway unifiedMcpModelGateway, McpResponseExtractor mcpResponseExtractor, McpAgentResponseService mcpAgentResponseService, DesenvolvimentoPromptBuilder desenvolvimentoPromptBuilder, AgentToolPromptSectionBuilder agentToolPromptSectionBuilder) {
+        this(
+                modelNameResolver,
+                unifiedMcpModelGateway,
+                mcpResponseExtractor,
+                mcpAgentResponseService,
+                desenvolvimentoPromptBuilder,
+                agentToolPromptSectionBuilder,
+                new StructuralContextDetector(),
+                ModelChannel.PLANNER
+        );
+    }
+
+    public SingleModelCoordinator(ModelNameResolver modelNameResolver, UnifiedMcpModelGateway unifiedMcpModelGateway, McpResponseExtractor mcpResponseExtractor, McpAgentResponseService mcpAgentResponseService, DesenvolvimentoPromptBuilder desenvolvimentoPromptBuilder, AgentToolPromptSectionBuilder agentToolPromptSectionBuilder, StructuralContextDetector structuralContextDetector) {
+        this(modelNameResolver, unifiedMcpModelGateway, mcpResponseExtractor, mcpAgentResponseService, desenvolvimentoPromptBuilder, agentToolPromptSectionBuilder, structuralContextDetector, ModelChannel.PLANNER);
+    }
+
+    public SingleModelCoordinator(ModelNameResolver modelNameResolver, UnifiedMcpModelGateway unifiedMcpModelGateway, McpResponseExtractor mcpResponseExtractor, McpAgentResponseService mcpAgentResponseService, DesenvolvimentoPromptBuilder desenvolvimentoPromptBuilder, AgentToolPromptSectionBuilder agentToolPromptSectionBuilder, StructuralContextDetector structuralContextDetector, ModelChannel modelChannel) {
         this.modelNameResolver = modelNameResolver;
-        this.unifiedMcpModelGateway = unifiedMcpModelGateway;
-        this.mcpResponseExtractor = mcpResponseExtractor;
-        this.mcpAgentResponseService = mcpAgentResponseService;
-        this.desenvolvimentoPromptBuilder = desenvolvimentoPromptBuilder;
-        this.agentToolPromptSectionBuilder = agentToolPromptSectionBuilder;
+        this.unifiedMcpModelGateway = unifiedMcpModelGateway != null
+                ? unifiedMcpModelGateway
+                : new UnifiedMcpModelGateway(UnifiedMcpModelGateway.DEFAULT_MCP_API_URL);
+        this.mcpResponseExtractor = mcpResponseExtractor != null ? mcpResponseExtractor : new McpResponseExtractor();
+        this.mcpAgentResponseService = mcpAgentResponseService != null ? mcpAgentResponseService : new McpAgentResponseService();
+        this.desenvolvimentoPromptBuilder = desenvolvimentoPromptBuilder != null ? desenvolvimentoPromptBuilder : new DesenvolvimentoPromptBuilder();
+        this.agentToolPromptSectionBuilder = agentToolPromptSectionBuilder != null ? agentToolPromptSectionBuilder : new AgentToolPromptSectionBuilder();
+        this.structuralContextDetector = structuralContextDetector != null ? structuralContextDetector : new StructuralContextDetector();
+        this.modelChannel = modelChannel != null ? modelChannel : ModelChannel.PLANNER;
     }
 
     @Override
@@ -58,7 +99,7 @@ public class SingleModelCoordinator implements AgentModelCoordinator {
 
         boolean possuiTrechoTextual = textoSelecionado.trim().length() > 0;
         boolean possuiArquivoTextual = textoArquivoCompleto.trim().length() > 0;
-        boolean possuiContextoEstrutural = possuiContextoEstruturalNoPrompt(textoInstrucao);
+        boolean possuiContextoEstrutural = structuralContextDetector.hasStructuralContext(textoInstrucao);
 
         if (!possuiTrechoTextual && !possuiArquivoTextual && !possuiContextoEstrutural) {
             throw new IllegalStateException(
@@ -88,59 +129,118 @@ public class SingleModelCoordinator implements AgentModelCoordinator {
                 secaoExemplosFerramentas
         );
 
-        String modelName = resolvePlannerModelNameSeguro();
+        ModelExecutionProfile profile = unifiedMcpModelGateway.resolveProfile(modelChannel);
 
         System.out.println("[MCP DEBUG] SingleModelCoordinator");
-        System.out.println("[MCP DEBUG] modelName=" + modelName);
+        System.out.println("[MCP DEBUG] channel=" + modelChannel.name());
+        System.out.println("[MCP DEBUG] " + modelChannel.getPropertySuffix() + ".transport=" + profile.getTransportKind());
+        System.out.println("[MCP DEBUG] " + modelChannel.getPropertySuffix() + ".requestFormat=" + profile.getRequestFormatKind());
+        System.out.println("[MCP DEBUG] " + modelChannel.getPropertySuffix() + ".responseFormat=" + profile.getResponseFormatKind());
+        System.out.println("[MCP DEBUG] " + modelChannel.getPropertySuffix() + ".model=" + profile.resolveEffectiveModelName());
         System.out.println("[MCP DEBUG] modoOperacionalDetectado=" + modoOperacionalDetectado);
         System.out.println("[MCP DEBUG] promptLength=" + promptEngenharia.length());
 
-        String rawResponse = unifiedMcpModelGateway.callModel(modelName, promptEngenharia, apiKey);
+        ModelExecutionResponse executionResponse = unifiedMcpModelGateway.executeChannelPrompt(modelChannel, promptEngenharia, com.mcp.sailibrary.plugin.mcp.core.McpAccessCredentials.forApiKey(apiKey));
 
-        System.out.println("[MCP DEBUG] rawResponse=" + truncateForDebug(rawResponse, 3000));
-
-        if (mcpAgentResponseService.isModelInfrastructureFailureText(rawResponse)) {
-            System.out.println("[MCP DEBUG] rawResponse classificado como falha de infraestrutura.");
+        if (executionResponse == null) {
             return mcpAgentResponseService.buildInfrastructureFailureResponse(
-                    truncateForDebug(rawResponse, 1200),
+                    "Falha ao executar o planner. Nenhuma resposta estruturada foi retornada pelo gateway.",
                     false
             );
         }
 
-        String textResponse = mcpResponseExtractor.extractPrimaryText(rawResponse);
+        String rawResponse = executionResponse.getRawResponseBody();
+        String textResponse = executionResponse.getPrimaryText();
 
-        System.out.println("[MCP DEBUG] textResponse=" + truncateForDebug(textResponse, 3000));
+        String textResponseNormalizado = normalizarRespostaEstruturada(textResponse);
+        System.out.println("[MCP DEBUG] textResponseNormalizado=" + truncateForDebug(textResponseNormalizado, 3000));
 
-        if (mcpAgentResponseService.isModelInfrastructureFailureText(textResponse)) {
+        if (mcpAgentResponseService.isModelInfrastructureFailureText(textResponseNormalizado)) {
             System.out.println("[MCP DEBUG] textResponse classificado como falha de infraestrutura.");
             return mcpAgentResponseService.buildInfrastructureFailureResponse(
-                    truncateForDebug(textResponse, 1200),
+                    truncateForDebug(textResponseNormalizado, 1200),
                     false
             );
         }
 
-        AiResponse resposta = mcpAgentResponseService.interpretarRespostaIA(textResponse);
+        AiResponse resposta = mcpAgentResponseService.interpretarRespostaIA(textResponseNormalizado);
         resposta = mcpAgentResponseService.normalizarProtocoloFerramentaLegado(resposta);
 
-        if (resposta == null) {
-            System.out.println("[MCP DEBUG] parsedAiResponse=null");
+        if ((resposta == null || !mcpAgentResponseService.respostaEstruturadaValida(resposta))
+                && rawResponse != null
+                && rawResponse.trim().length() > 0) {
+
+            String respostaCruaNormalizada = normalizarRespostaEstruturada(
+                    mcpResponseExtractor.extractPrimaryText(rawResponse)
+            );
+
+            if (respostaCruaNormalizada != null
+                    && respostaCruaNormalizada.trim().length() > 0
+                    && !respostaCruaNormalizada.equals(textResponseNormalizado)) {
+
+                System.out.println("[MCP DEBUG] Tentando recuperar parse a partir do raw response normalizado.");
+                resposta = mcpAgentResponseService.interpretarRespostaIA(respostaCruaNormalizada);
+                resposta = mcpAgentResponseService.normalizarProtocoloFerramentaLegado(resposta);
+
+                if (resposta != null && mcpAgentResponseService.respostaEstruturadaValida(resposta)) {
+                    textResponseNormalizado = respostaCruaNormalizada;
+                }
+            }
+        }
+
+        if (resposta == null || !mcpAgentResponseService.respostaEstruturadaValida(resposta)) {
+            System.out.println("[MCP DEBUG] parsedAiResponse invalido apos normalizacao.");
             return mcpAgentResponseService.buildInfrastructureFailureResponse(
-                    "Falha ao interpretar a resposta estruturada do modelo. O retorno nao foi tratado como JSON valido do protocolo interno.",
+                    "Falha de protocolo da IA. O retorno veio duplicado, incompleto ou fora do contrato estruturado esperado.",
                     false
             );
         }
 
-        if (resposta != null) {
-            System.out.println("[MCP DEBUG] parsedAiResponse.action=" + resposta.getAction());
-            System.out.println("[MCP DEBUG] parsedAiResponse.tool=" + resposta.getTool());
-            System.out.println("[MCP DEBUG] parsedAiResponse.question=" + resposta.getQuestion());
-            System.out.println("[MCP DEBUG] parsedAiResponse.explanation=" + truncateForDebug(resposta.getExplanation(), 1000));
-            System.out.println("[MCP DEBUG] parsedAiResponse.content=" + truncateForDebug(resposta.getContent(), 1500));
-        }
+        System.out.println("[MCP DEBUG] parsedAiResponse.action=" + resposta.getAction());
+        System.out.println("[MCP DEBUG] parsedAiResponse.tool=" + resposta.getTool());
+        System.out.println("[MCP DEBUG] parsedAiResponse.question=" + resposta.getQuestion());
+        System.out.println("[MCP DEBUG] parsedAiResponse.explanation=" + truncateForDebug(resposta.getExplanation(), 1000));
+        System.out.println("[MCP DEBUG] parsedAiResponse.content=" + truncateForDebug(resposta.getContent(), 1500));
 
         return resposta;
     }
+    private String normalizarRespostaEstruturada(String texto) {
+        if (texto == null) {
+            return "";
+        }
 
+        String textoNormalizado = texto.trim();
+        String primeiroBloco = extrairPrimeiroBlocoEstruturado(textoNormalizado);
+
+        if (primeiroBloco.length() > 0) {
+            if (!primeiroBloco.equals(textoNormalizado)) {
+                System.out.println("[MCP DEBUG] Resposta estruturada com ruido ou duplicacao detectada. Usando primeiro bloco valido.");
+            }
+            return primeiroBloco;
+        }
+
+        return textoNormalizado;
+    }
+
+    private String extrairPrimeiroBlocoEstruturado(String texto) {
+        if (texto == null) {
+            return "";
+        }
+
+        int inicioThinking = texto.indexOf("<thinking>");
+        int inicioCodigo = texto.indexOf("<codigo_final>");
+        int fimCodigo = texto.indexOf("</codigo_final>");
+
+        if (inicioThinking >= 0 && fimCodigo > inicioThinking) {
+            return texto.substring(inicioThinking, fimCodigo + "</codigo_final>".length()).trim();
+        }
+
+        if (inicioCodigo >= 0 && fimCodigo > inicioCodigo) {
+            return texto.substring(inicioCodigo, fimCodigo + "</codigo_final>".length()).trim();
+        }
+
+        return "";
+    }
     private String truncateForDebug(String value, int max) {
         if (value == null) {
             return "null";
@@ -151,68 +251,5 @@ public class SingleModelCoordinator implements AgentModelCoordinator {
         }
 
         return value.substring(0, max) + "... [TRUNCATED]";
-    }
-
-    private String resolvePlannerModelNameSeguro() {
-        ModelNameResolver resolverEfetivo = modelNameResolver;
-        if (resolverEfetivo == null) {
-            System.out.println("[MCP CONFIG DEBUG] ModelNameResolver nulo no SingleModelCoordinator. Usando resolver default.");
-            resolverEfetivo = new DefaultMcpModelNameResolver();
-        }
-
-        String modelName = resolverEfetivo.resolvePlannerModelName();
-        if (isBlank(modelName)) {
-            System.out.println("[MCP CONFIG DEBUG] resolvePlannerModelName vazio no SingleModelCoordinator. Usando fallback do resolver default.");
-            modelName = new DefaultMcpModelNameResolver().resolvePlannerModelName();
-        }
-
-        System.out.println("[MCP CONFIG DEBUG] SingleModelCoordinator usando planner model=[" + modelName + "]");
-        return modelName;
-    }
-
-    private boolean possuiContextoEstruturalNoPrompt(String textoInstrucao) {
-        if (textoInstrucao == null || textoInstrucao.trim().length() == 0) {
-            return false;
-        }
-
-        String texto = textoInstrucao;
-
-        if (texto.contains("@")) {
-            java.util.regex.Pattern aliasPattern = java.util.regex.Pattern.compile("@[a-zA-Z0-9_]+");
-            java.util.regex.Matcher matcher = aliasPattern.matcher(texto);
-            if (matcher.find()) {
-                return true;
-            }
-        }
-
-        if (texto.contains("=== CONTEXTO ESTRUTURAL DA SESSAO ===")) {
-            return true;
-        }
-
-        if (texto.contains("FOCO_PRINCIPAL_ESTRUTURAL:")) {
-            return true;
-        }
-
-        if (texto.contains("ESCOPO_EDITAVEL_ESTRUTURAL:")) {
-            return true;
-        }
-
-        if (texto.contains("ESCOPO_REFERENCIAL_ESTRUTURAL:")) {
-            return true;
-        }
-
-        if (texto.contains("Contexto estrutural")) {
-            return true;
-        }
-
-        if (texto.contains("ALVO PRINCIPAL:") && texto.contains("arquivo=")) {
-            return true;
-        }
-
-        return false;
-    }
-
-    private boolean isBlank(String value) {
-        return value == null || value.trim().length() == 0;
     }
 }

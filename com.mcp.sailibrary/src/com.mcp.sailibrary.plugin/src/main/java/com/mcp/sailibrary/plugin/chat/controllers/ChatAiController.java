@@ -23,6 +23,7 @@ import com.mcp.sailibrary.plugin.chat.support.CodeApplicationState;
 import com.mcp.sailibrary.plugin.chat.support.ToolResultSummarizer;
 import com.mcp.sailibrary.plugin.chat.support.WorkspaceCompilationValidationResult;
 import com.mcp.sailibrary.plugin.chat.views.ChatView;
+
 import com.mcp.sailibrary.plugin.mcp.multimodel.coordinator.AgentModelCoordinator;
 import com.mcp.sailibrary.plugin.mcp.multimodel.coordinator.MultiModelCoordinator;
 import com.mcp.sailibrary.plugin.mcp.multimodel.coordinator.SingleModelCoordinator;
@@ -889,7 +890,9 @@ public class ChatAiController {
                     }
 
                     AiResponse ultimaRespostaEstruturadaValida = null;
-
+                    int tentativasFalhaProtocolo = 0;
+                    String ultimaAssinaturaFerramenta = null;
+                    int repeticoesMesmaFerramenta = 0;
                     while (contextoMissao.getIteracaoAtual() < contextoMissao.getIteracoesMaximas()
                             && !contextoMissao.isMissaoConcluida()) {
 
@@ -958,22 +961,46 @@ public class ChatAiController {
                         }
 
                         if (!mcpResponseService.respostaEstruturadaValida(respostaIA)) {
-                            StringBuilder detalheFalhaProtocolo = new StringBuilder();
-                            detalheFalhaProtocolo.append("Falha de protocolo da IA.");
-                            detalheFalhaProtocolo.append(System.lineSeparator());
-                            detalheFalhaProtocolo.append("action=").append(respostaIA.getAction());
-                            detalheFalhaProtocolo.append(System.lineSeparator());
-                            detalheFalhaProtocolo.append("tool=").append(respostaIA.getTool());
-                            detalheFalhaProtocolo.append(System.lineSeparator());
-                            detalheFalhaProtocolo.append("question=").append(respostaIA.getQuestion());
-                            detalheFalhaProtocolo.append(System.lineSeparator());
-                            detalheFalhaProtocolo.append("explanation=").append(respostaIA.getExplanation());
+                            tentativasFalhaProtocolo++;
 
-                            view.adicionarMensagemAssincrona("IA", detalheFalhaProtocolo.toString());
+                            String detalheFalhaProtocolo = montarDetalheFalhaProtocolo(respostaIA);
+                            view.adicionarMensagemAssincrona("IA", detalheFalhaProtocolo);
                             atualizarStatusNaView("Falha de protocolo da IA");
-                            registrarAtividadeOperacional("ERRO", "Resposta da IA nao respeitou o protocolo interno.");
+                            registrarAtividadeOperacional("PROTOCOLO", detalheFalhaProtocolo);
+
+                            if (tentativasFalhaProtocolo <= 2) {
+                                contextoMissao.setInstrucaoEnriquecida(
+                                        anexarInstrucaoRecuperacaoProtocolo(
+                                                contextoMissao.getInstrucaoEnriquecida(),
+                                                tentativasFalhaProtocolo
+                                        )
+                                );
+
+                                view.adicionarMensagemAssincrona(
+                                        "Sistema",
+                                        "Falha de protocolo detectada. Tentando recuperar a resposta com protocolo estrito. Tentativa "
+                                                + tentativasFalhaProtocolo + " de 2."
+                                );
+                                registrarAtividadeOperacional(
+                                        "PROTOCOLO",
+                                        "Solicitando nova resposta com protocolo estrito. Tentativa "
+                                                + tentativasFalhaProtocolo + " de 2."
+                                );
+                                continue;
+                            }
+
+                            view.adicionarMensagemAssincrona(
+                                    "Sistema",
+                                    "Falha de protocolo persistente. Encerrando para evitar ciclo improdutivo."
+                            );
+                            registrarAtividadeOperacional(
+                                    "ERRO",
+                                    "Falha de protocolo persistente apos tentativas de recuperacao."
+                            );
                             return;
                         }
+
+                        tentativasFalhaProtocolo = 0;
                         if (isRespostaDeFalhaTecnicaModelo(respostaIA)) {
                             contextoMissao.setMissaoConcluida(true);
                             sessionHistoryService.adicionar("[IA - FALHA_INFRA]: " + respostaIA.getExplanation());
@@ -1000,14 +1027,52 @@ public class ChatAiController {
 
                         if ("executar_ferramenta".equalsIgnoreCase(respostaIA.getAction())) {
                             String nomeFerramenta = respostaIA.getTool();
+                            String assinaturaFerramentaAtual = construirAssinaturaFerramenta(respostaIA);
+
+                            if (assinaturaFerramentaAtual.equals(ultimaAssinaturaFerramenta)) {
+                                repeticoesMesmaFerramenta++;
+                            } else {
+                                ultimaAssinaturaFerramenta = assinaturaFerramentaAtual;
+                                repeticoesMesmaFerramenta = 1;
+                            }
+
+                            if (repeticoesMesmaFerramenta > 2) {
+                                String mensagemLoop = "Mesma ferramenta repetida em sequencia: " + assinaturaFerramentaAtual;
+                                view.adicionarMensagemAssincrona("Sistema", mensagemLoop);
+                                registrarAtividadeOperacional("RESILIENCIA", mensagemLoop);
+
+                                contextoMissao.setInstrucaoEnriquecida(
+                                        contextoMissao.getInstrucaoEnriquecida()
+                                                + "\n\n=== ALERTA DE RESILIENCIA ===\n"
+                                                + "A mesma ferramenta foi repetida em sequencia.\n"
+                                                + "E proibido repetir a ferramenta "
+                                                + nomeFerramenta
+                                                + " novamente com os mesmos parametros.\n"
+                                                + "Mude a trilha de investigacao ou conclua com o que ja foi confirmado.\n"
+                                );
+
+                                if (repeticoesMesmaFerramenta > 3) {
+                                    view.adicionarMensagemAssincrona(
+                                            "Sistema",
+                                            "Loop de ferramenta detectado. Encerrando para preservar custo e estabilidade."
+                                    );
+                                    atualizarStatusNaView("Loop de ferramenta detectado");
+                                    registrarAtividadeOperacional("ERRO", "Loop de ferramenta detectado.");
+                                    return;
+                                }
+                            }
                             String parametrosFerramenta = mcpResponseService.serializarParametrosFerramenta(respostaIA.getParameters());
 
                             atualizarStatusNaView("Executando " + nomeFerramenta);
                             registrarAtividadeOperacional("TOOL", "Executando ferramenta " + nomeFerramenta + ".");
 
-                            view.adicionarMensagemAssincrona("Sistema",
-                                    "[Ciclo " + contextoMissao.getIteracaoAtual() + "/" + contextoMissao.getIteracoesMaximas() + "] Executando ferramenta: "
-                                            + nomeFerramenta + " " + parametrosFerramenta + " Porque: " + respostaIA.getExplanation());
+                            view.adicionarMensagemAssincrona(
+                                    "Sistema",
+                                    montarMensagemFerramentaParaUsuario(
+                                            nomeFerramenta,
+                                            respostaIA.getExplanation()
+                                    )
+                            );
 
                             ToolStepResult resultadoTool = missionToolStepService.executarFerramenta(
                                     nomeFerramenta,
@@ -1037,16 +1102,22 @@ public class ChatAiController {
                                     || "explorar_diretorio".equals(nomeFerramenta)) {
                                 view.adicionarMensagemAssincrona("Ferramenta", nomeFerramenta + System.lineSeparator() + "Parametros: " + parametrosFerramenta);
                             } else {
-                                view.adicionarMensagemAssincrona("Ferramenta", nomeFerramenta + System.lineSeparator()
-                                        + "Parametros: " + parametrosFerramenta + System.lineSeparator()
-                                        + "Resultado resumido:" + System.lineSeparator()
-                                        + resultadoTool.getResultadoParaChat());
+                            	view.adicionarMensagemAssincrona(
+                            	        "Ferramenta",
+                            	        montarResultadoFerramentaParaUsuario(nomeFerramenta, resultadoTool.getResultadoParaChat())
+                            	);
                             }
+
+                            String resultadoFerramentaParaPrompt = resumirResultadoFerramentaParaPrompt(
+                                    nomeFerramenta,
+                                    compactarResultadoFerramentaParaPrompt(nomeFerramenta, resultadoTool.getResultadoBruto()),
+                                    resultadoTool.getResultadoParaChat()
+                            );
 
                             String novaInstrucao = contextoMissao.getInstrucaoEnriquecida()
                                     + "\n\n=== RESULTADO DA FERRAMENTA [" + nomeFerramenta + "] ===\n"
                                     + "PARAMETROS: " + parametrosFerramenta + "\n"
-                                    + resultadoTool.getResultadoBruto()
+                                    + resultadoFerramentaParaPrompt
                                     + "\n=========================================\n"
                                     + "Regras obrigatorias apos usar ferramenta:\n"
                                     + "1. Reutilize a raiz segura e os caminhos relativos descobertos.\n"
@@ -1218,6 +1289,289 @@ public class ChatAiController {
 
         missaoThread.setName("Operacao-Autonoma-IA");
         missaoThread.start();
+    }
+    private String compactarResultadoFerramentaParaPrompt(String nomeFerramenta, String resultadoBruto) {
+        if (resultadoBruto == null) {
+            return "";
+        }
+
+        int limite = 6000;
+
+        if ("resumir_impacto_alteracao".equals(nomeFerramenta)) {
+            limite = 5000;
+        } else if ("leitura_cirurgica_jdt".equals(nomeFerramenta)) {
+            limite = 7000;
+        } else if ("buscar_texto_projeto".equals(nomeFerramenta)) {
+            limite = 3500;
+        } else if ("explorar_diretorio".equals(nomeFerramenta)) {
+            limite = 3000;
+        } else if ("ler_conteudo_arquivo".equals(nomeFerramenta)) {
+            limite = 8000;
+        }
+
+        if (resultadoBruto.length() <= limite) {
+            return resultadoBruto;
+        }
+
+        return resultadoBruto.substring(0, limite)
+                + System.lineSeparator()
+                + "[RESUMO INTERNO]: Resultado truncado para preservar contexto. Use nova ferramenta se precisar de mais detalhes.";
+    }
+    private String montarResultadoFerramentaParaUsuario(String nomeFerramenta, String resultadoParaChat) {
+        StringBuilder mensagem = new StringBuilder();
+
+        mensagem.append("Resultado da verificacao: ");
+        mensagem.append(nomeFerramentaParaUsuario(nomeFerramenta));
+        mensagem.append(System.lineSeparator());
+
+        String conclusao = extrairConclusaoFerramentaParaUsuario(nomeFerramenta, resultadoParaChat);
+        mensagem.append(conclusao);
+
+        return mensagem.toString();
+    }
+
+    private String extrairConclusaoFerramentaParaUsuario(String nomeFerramenta, String resultado) {
+        if (resultado == null || resultado.trim().length() == 0) {
+            return "Nao foi possivel obter uma conclusao util dessa verificacao.";
+        }
+
+        String texto = resultado.trim();
+
+        String conclusao = extrairLinhaAposMarcador(texto, "Conclusao tatica final");
+        if (!isBlank(conclusao)) {
+            return conclusao;
+        }
+
+        conclusao = extrairLinhaAposMarcador(texto, "Conclusao tatica");
+        if (!isBlank(conclusao)) {
+            return conclusao;
+        }
+
+        if ("buscar_implementacoes_tipo".equals(nomeFerramenta)) {
+            if (texto.contains("Implementacao localizada em:")) {
+                return "Encontrei a implementacao real usada pelo sistema. Vou abrir esse ponto para confirmar o comportamento antes de alterar o codigo.";
+            }
+            return "Nao encontrei uma implementacao concreta clara para esse contrato.";
+        }
+
+        if ("leitura_cirurgica_jdt".equals(nomeFerramenta)) {
+            if (texto.contains("EXTRACAO CIRURGICA DE METODO")) {
+                return "Consegui ler o metodo especifico necessario para continuar a analise com menos suposicao.";
+            }
+            return "A leitura especifica nao trouxe um metodo claro.";
+        }
+
+        if ("buscar_callees_jdt".equals(nomeFerramenta)) {
+            return resumirPrimeirasLinhas(texto, 5);
+        }
+
+        if ("buscar_chamadores_jdt".equals(nomeFerramenta)) {
+            return resumirPrimeirasLinhas(texto, 5);
+        }
+
+        if ("inspecionar_efeitos_colaterais".equals(nomeFerramenta)) {
+            return resumirPrimeirasLinhas(texto, 6);
+        }
+
+        return resumirPrimeirasLinhas(texto, 6);
+    }
+    private boolean isBlank(String value) {
+        return value == null || value.trim().length() == 0;
+    }
+    private String extrairLinhaAposMarcador(String texto, String marcador) {
+        if (texto == null || marcador == null) {
+            return "";
+        }
+
+        int indice = texto.indexOf(marcador);
+        if (indice < 0) {
+            return "";
+        }
+
+        String restante = texto.substring(indice + marcador.length()).trim();
+        String[] linhas = restante.split("\\r?\\n");
+
+        for (int i = 0; i < linhas.length; i++) {
+            String linha = linhas[i] != null ? linhas[i].trim() : "";
+            if (linha.length() > 0) {
+                return linha;
+            }
+        }
+
+        return "";
+    }
+
+    private String resumirPrimeirasLinhas(String texto, int maxLinhas) {
+        if (texto == null) {
+            return "";
+        }
+
+        String[] linhas = texto.split("\\r?\\n");
+        StringBuilder builder = new StringBuilder();
+
+        int adicionadas = 0;
+        for (int i = 0; i < linhas.length && adicionadas < maxLinhas; i++) {
+            String linha = linhas[i] != null ? linhas[i].trim() : "";
+            if (linha.length() == 0) {
+                continue;
+            }
+
+            if (builder.length() > 0) {
+                builder.append(System.lineSeparator());
+            }
+
+            builder.append(linha);
+            adicionadas++;
+        }
+
+        if (linhas.length > maxLinhas) {
+            builder.append(System.lineSeparator()).append("A verificacao completa foi usada internamente para continuar a analise.");
+        }
+
+        return builder.toString();
+    }
+    private String montarMensagemFerramentaParaUsuario(String nomeFerramenta, String explicacao) {
+        String nomeAmigavel = nomeFerramentaParaUsuario(nomeFerramenta);
+
+        StringBuilder mensagem = new StringBuilder();
+        mensagem.append("Estou verificando: ").append(nomeAmigavel).append(".");
+
+        if (explicacao != null && explicacao.trim().length() > 0) {
+            mensagem.append(System.lineSeparator());
+            mensagem.append("Motivo: ").append(simplificarExplicacaoParaUsuario(explicacao));
+        }
+
+        return mensagem.toString();
+    }
+
+    private String nomeFerramentaParaUsuario(String nomeFerramenta) {
+        if (nomeFerramenta == null) {
+            return "informacoes do projeto";
+        }
+
+        if ("resumir_impacto_alteracao".equals(nomeFerramenta)) {
+            return "impacto da alteracao";
+        }
+
+        if ("buscar_implementacoes_tipo".equals(nomeFerramenta)) {
+            return "implementacao real usada pelo sistema";
+        }
+
+        if ("leitura_cirurgica_jdt".equals(nomeFerramenta)) {
+            return "trecho especifico do codigo";
+        }
+
+        if ("buscar_chamadores_jdt".equals(nomeFerramenta)) {
+            return "quem chama este metodo";
+        }
+
+        if ("buscar_callees_jdt".equals(nomeFerramenta)) {
+            return "o que este metodo chama";
+        }
+
+        if ("inspecionar_efeitos_colaterais".equals(nomeFerramenta)) {
+            return "efeitos colaterais e mutacoes";
+        }
+
+        if ("extrair_queries_trecho".equals(nomeFerramenta)) {
+            return "consultas e acesso a dados";
+        }
+
+        if ("inspecionar_override_metodo".equals(nomeFerramenta)) {
+            return "heranca e sobrescritas";
+        }
+
+        if ("inspecionar_dependencias_projeto".equals(nomeFerramenta)) {
+            return "dependencias do projeto";
+        }
+
+        return nomeFerramenta.replace("_", " ");
+    }
+
+    private String simplificarExplicacaoParaUsuario(String explicacao) {
+        if (explicacao == null) {
+            return "";
+        }
+
+        String texto = explicacao.trim();
+
+        texto = texto.replace("@pesquisa", "o alvo selecionado");
+        texto = texto.replace("conclusao segura", "responder com seguranca");
+        texto = texto.replace("trilha concreta", "fluxo real do codigo");
+        texto = texto.replace("endurecer", "tornar mais seguro");
+
+        if (texto.length() > 220) {
+            texto = texto.substring(0, 220) + "...";
+        }
+
+        return texto;
+    }
+    private String montarDetalheFalhaProtocolo(AiResponse respostaIA) {
+        StringBuilder detalhe = new StringBuilder();
+        detalhe.append("Falha de protocolo da IA.");
+        detalhe.append(System.lineSeparator());
+        detalhe.append("action=").append(respostaIA != null ? respostaIA.getAction() : null);
+        detalhe.append(System.lineSeparator());
+        detalhe.append("tool=").append(respostaIA != null ? respostaIA.getTool() : null);
+        detalhe.append(System.lineSeparator());
+        detalhe.append("question=").append(respostaIA != null ? respostaIA.getQuestion() : null);
+        detalhe.append(System.lineSeparator());
+        detalhe.append("explanation=").append(respostaIA != null ? respostaIA.getExplanation() : null);
+        return detalhe.toString();
+    }
+
+    private String anexarInstrucaoRecuperacaoProtocolo(String instrucaoAtual, int tentativa) {
+        StringBuilder builder = new StringBuilder();
+        builder.append(instrucaoAtual != null ? instrucaoAtual : "");
+        builder.append("\n\n=== CORRECAO DE PROTOCOLO OBRIGATORIA ===\n");
+        builder.append("Tentativa de recuperacao: ").append(tentativa).append("\n");
+        builder.append("A resposta anterior violou o protocolo.\n");
+        builder.append("Responda com exatamente um bloco <thinking>, um bloco <racional> e um bloco <codigo_final>.\n");
+        builder.append("Nao repita blocos.\n");
+        builder.append("Nao duplique JSON.\n");
+        builder.append("Se for usar ferramenta, devolva apenas um unico JSON valido dentro de <codigo_final>.\n");
+        builder.append("Se nao conseguir cumprir, use action responder_ao_usuario explicando a limitacao.\n");
+        return builder.toString();
+    }
+
+    private String construirAssinaturaFerramenta(AiResponse respostaIA) {
+        String nomeFerramenta = respostaIA != null && respostaIA.getTool() != null
+                ? respostaIA.getTool().trim()
+                : "";
+
+        String parametros = "";
+        try {
+            parametros = respostaIA != null
+                    ? mcpResponseService.serializarParametrosFerramenta(respostaIA.getParameters())
+                    : "";
+        } catch (Exception e) {
+            parametros = "";
+        }
+
+        return nomeFerramenta + "|" + parametros;
+    }
+
+    private String resumirResultadoFerramentaParaPrompt(String nomeFerramenta, String resultadoBruto, String resultadoResumido) {
+        String textoBase = resultadoResumido != null && resultadoResumido.trim().length() > 0
+                ? resultadoResumido
+                : resultadoBruto;
+
+        if (textoBase == null) {
+            return "";
+        }
+
+        String textoNormalizado = textoBase.trim();
+        int limite = 6000;
+
+        if (textoNormalizado.length() <= limite) {
+            return textoNormalizado;
+        }
+
+        StringBuilder resumo = new StringBuilder();
+        resumo.append(textoNormalizado.substring(0, limite));
+        resumo.append("\n[RESUMO]: Conteudo truncado para preservar estabilidade do protocolo.");
+        resumo.append("\n[FONTE]: ").append(nomeFerramenta != null ? nomeFerramenta : "");
+        return resumo.toString();
     }
     private boolean isRespostaDeFalhaTecnicaModelo(AiResponse respostaIA) {
         if (respostaIA == null) {
@@ -2019,6 +2373,8 @@ public class ChatAiController {
     private void reconfigurarCoordenadorModelosAtual() {
         if (view == null) {
             agentModelCoordinator = new SingleModelCoordinator();
+            System.out.println("[MCP COORDINATOR DEBUG] coordinatorClass=" + agentModelCoordinator.getClass().getName()
+                    + " | viewAvailable=false | modoExecucao=single | multiModelEnabled=false");
             return;
         }
 
@@ -2026,10 +2382,14 @@ public class ChatAiController {
 
         if (ChatRuntimeSettings.MODO_EXECUCAO_MULTI.equals(modoExecucao)) {
             agentModelCoordinator = new MultiModelCoordinator();
+            System.out.println("[MCP COORDINATOR DEBUG] coordinatorClass=" + agentModelCoordinator.getClass().getName()
+                    + " | modoExecucao=" + modoExecucao + " | multiModelEnabled=true");
             return;
         }
 
         agentModelCoordinator = new SingleModelCoordinator();
+        System.out.println("[MCP COORDINATOR DEBUG] coordinatorClass=" + agentModelCoordinator.getClass().getName()
+                + " | modoExecucao=" + modoExecucao + " | multiModelEnabled=false");
     }
     private boolean validarPreCondicoesAplicacao(AiResponse respostaIA) {
         if (respostaIA == null) {

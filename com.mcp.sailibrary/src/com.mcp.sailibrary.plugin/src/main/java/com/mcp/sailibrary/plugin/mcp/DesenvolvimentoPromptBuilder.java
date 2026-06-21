@@ -1,42 +1,67 @@
 package com.mcp.sailibrary.plugin.mcp;
 
-/** * Monta o prompt principal de engenharia usado na chamada de desenvolvimento * livre GPT5. * * <p>O objetivo desta classe e preservar o conteudo e a intencao do prompt * original, mas distribuindo a montagem em metodos menores para melhorar * manutencao, leitura e evolucao sem regressao de comportamento.</p> * * @author Renato Tomaz Nati * @since 2026-05-20 */
+/** * Monta o prompt principal de engenharia usado na chamada de desenvolvimento. * * <p>Esta classe permanece como builder puro de prompt: * - nao conhece HTTP * - nao conhece JSON-RPC * - nao conhece SSE * - nao conhece apiKey/cookie * - nao conhece o nome fisico do modelo</p> * * @author Renato Tomaz Nati * @since 2026-05-26 */
 public class DesenvolvimentoPromptBuilder {
 
-    /** * Construi o prompt principal de engenharia. * * @param modoOperacionalDetectado modo detectado entre textual e estrutural * @param textoSelecionadoParaPrompt trecho textual selecionado ou marcador * @param textoArquivoCompletoParaPrompt conteudo integral do arquivo ou * marcador * @param textoInstrucaoParaPrompt instrucao enriquecida * @param secaoFerramentas secao dinamica de ferramentas homologadas * @param secaoExemplosFerramentas secao dinamica de exemplos de tools * @return prompt completo pronto para envio ao MCP * * @author Renato Tomaz Nati * @since 2026-05-20 */
+    /** * Construi o prompt principal de engenharia. * * @param modoOperacionalDetectado modo detectado entre textual e estrutural * @param textoSelecionadoParaPrompt trecho textual selecionado ou marcador * @param textoArquivoCompletoParaPrompt conteudo integral do arquivo ou marcador * @param textoInstrucaoParaPrompt instrucao enriquecida * @param secaoFerramentas secao dinamica de ferramentas homologadas * @param secaoExemplosFerramentas secao dinamica de exemplos de tools * @return prompt completo pronto para envio */
     public String build(String modoOperacionalDetectado, String textoSelecionadoParaPrompt, String textoArquivoCompletoParaPrompt, String textoInstrucaoParaPrompt, String secaoFerramentas, String secaoExemplosFerramentas) {
 
+        String modoSeguro = safeMode(modoOperacionalDetectado);
+        String textoSelecionadoSeguro = safe(textoSelecionadoParaPrompt);
+        String textoArquivoCompletoSeguro = safe(textoArquivoCompletoParaPrompt);
+        String textoInstrucaoSeguro = safe(textoInstrucaoParaPrompt);
+        String secaoFerramentasSegura = safe(secaoFerramentas);
+        String secaoExemplosFerramentasSegura = safe(secaoExemplosFerramentas);
+
         StringBuilder sb = new StringBuilder();
-        sb.append(buildAgentIdentitySection());
-        sb.append(buildCoreRulesSection());
-        sb.append(buildAliasRulesSection());
-        sb.append(buildAliasDisambiguationSection());
-        sb.append(buildNamedContextSection());
-        sb.append(buildDetectedModeSection(modoOperacionalDetectado));
-        sb.append(buildAbsoluteRulesSection());
-        sb.append(buildSafeMutationRulesSection());
-        sb.append(buildMutationGovernanceSection());
-        sb.append(secaoFerramentas);
-        sb.append(buildWhenToUseActionSection());
-        sb.append(buildOutputFormatSection());
-        sb.append(buildToolExecutionRulesSection());
-        sb.append(buildAliasExamplesSection());
-        sb.append(secaoExemplosFerramentas);
-        sb.append(buildStrategicMutationExamplesSection());
-        sb.append(buildFinalActionExamplesSection());
-        sb.append(buildContentQualityRulesSection());
-        sb.append(buildPersistentMemoryRulesSection());
-        sb.append(buildInvestigationPrioritySection());
-        sb.append(buildExpectedBehaviorSection());
-        sb.append(buildContingencySection());
-        sb.append(buildSessionContinuitySection());
-        sb.append(buildOtherRulesSection());
-        sb.append(buildCurrentInputsSection(
-                textoArquivoCompletoParaPrompt,
-                textoSelecionadoParaPrompt,
-                textoInstrucaoParaPrompt
+        appendSection(sb, buildAgentIdentitySection());
+        appendSection(sb, buildCoreRulesSection());
+        appendSection(sb, buildAliasRulesSection());
+        appendSection(sb, buildAliasDisambiguationSection());
+        appendSection(sb, buildNamedContextSection());
+        appendSection(sb, buildDetectedModeSection(modoSeguro));
+        appendSection(sb, buildAbsoluteRulesSection());
+        appendSection(sb, buildSafeMutationRulesSection());
+        appendSection(sb, buildMutationGovernanceSection());
+        appendSection(sb, secaoFerramentasSegura);
+        appendSection(sb, buildWhenToUseActionSection());
+        appendSection(sb, buildOutputFormatSection());
+        appendSection(sb, buildToolExecutionRulesSection());
+        appendSection(sb, buildAliasExamplesSection());
+        appendSection(sb, secaoExemplosFerramentasSegura);
+        appendSection(sb, buildStrategicMutationExamplesSection());
+        appendSection(sb, buildFinalActionExamplesSection());
+        appendSection(sb, buildContentQualityRulesSection());
+        appendSection(sb, buildPersistentMemoryRulesSection());
+        appendSection(sb, buildInvestigationPrioritySection());
+        appendSection(sb, buildExpectedBehaviorSection());
+        appendSection(sb, buildContingencySection());
+        appendSection(sb, buildSessionContinuitySection());
+        appendSection(sb, buildOtherRulesSection());
+        appendSection(sb, buildCurrentInputsSection(
+                textoArquivoCompletoSeguro,
+                textoSelecionadoSeguro,
+                textoInstrucaoSeguro
         ));
         return sb.toString();
+    }
+
+    private void appendSection(StringBuilder sb, String section) {
+        if (sb == null || section == null || section.length() == 0) {
+            return;
+        }
+        sb.append(section);
+    }
+
+    private String safe(String value) {
+        return value != null ? value : "";
+    }
+
+    private String safeMode(String value) {
+        if ("MODO_ESTRUTURAL".equals(value)) {
+            return "MODO_ESTRUTURAL";
+        }
+        return "MODO_TEXTUAL";
     }
 
     private String buildAgentIdentitySection() {
@@ -75,6 +100,7 @@ public class DesenvolvimentoPromptBuilder {
                 + "Se o usuario citar mais de um alias na mesma instrucao, preserve a relacao entre eles exatamente como foi escrita.\n"
                 + "Se um alias for encontrado em contexto estrutural nomeado, respeite o tipo do contexto, o role e o escopo permitido.\n";
     }
+
     private String buildAliasDisambiguationSection() {
         return "\n=== REGRA DE DESAMBIGUACAO DE @ ===\n"
                 + "O caractere @ sozinho nao implica alias.\n"

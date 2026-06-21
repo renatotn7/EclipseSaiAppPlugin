@@ -2,7 +2,7 @@ Manifest-Version: 1.0
 Bundle-ManifestVersion: 2
 Bundle-Name: SAI Library MCP Plugin
 Bundle-SymbolicName: com.mcp.sailibrary.plugin;singleton:=true
-Bundle-Version: 1.0.0.202605260251
+Bundle-Version: 1.0.0.202606211802
 Bundle-Activator: com.mcp.sailibrary.plugin.Activator
 Bundle-Vendor: SaiLibraryMCPPlugin
 Require-Bundle: org.eclipse.ui,org.eclipse.ui.ide,org.eclipse.ui.navigat

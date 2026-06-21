@@ -842,11 +842,18 @@ public class NamedBlocksController {
 
     private String resolveApiKey() {
         String apiKey = System.getenv("SAI_MCP_API_KEY");
+
         if (apiKey == null || apiKey.trim().length() == 0) {
             apiKey = System.getProperty("SAI_MCP_API_KEY");
         }
+
+        if (apiKey == null || apiKey.trim().length() == 0) {
+            apiKey = System.getProperty("sai.mcp.apiKey");
+        }
+
         return apiKey;
     }
+    
 
     private String normalizePath(File file) {
         if (file == null) {

@@ -12,6 +12,7 @@ import com.mcp.sailibrary.plugin.mcp.multimodel.policy.DefaultFinalApplicationDe
 import com.mcp.sailibrary.plugin.mcp.multimodel.policy.FinalApplicationDecision;
 import com.mcp.sailibrary.plugin.mcp.multimodel.routing.DefaultModelRoutingPolicy;
 import com.mcp.sailibrary.plugin.mcp.multimodel.routing.ModelRoutingPolicy;
+import com.mcp.sailibrary.plugin.mcp.core.ModelChannel;
 
 /* --- version: "1.5" libraries: - AiResponse - CodeAuditResult - CodeAuditService - NoOpCodeAuditService - ClaudeCodeAuditService - CodeGenerationService - CodexCodeGenerationService - DefaultModelRoutingPolicy - ModelRoutingPolicy - DefaultFinalApplicationDecisionPolicy - FinalApplicationDecision objetivo: "Coordenar multi-modelo real separando reprovacao de codigo de falha tecnica do auditor e decidindo corretamente quando confirmar com o usuario." --- */
 
@@ -20,6 +21,8 @@ public class MultiModelCoordinator implements AgentModelCoordinator {
 
     private ModelRoutingPolicy politicaRoteamentoModelos;
     private AgentModelCoordinator coordenadorSingleModel;
+    private AgentModelCoordinator coordenadorInvestigador;
+    private AgentModelCoordinator coordenadorSumarizador;
     private CodeGenerationService servicoGeracaoCodigo;
     private CodeAuditService servicoAuditoriaCodigo;
     private DefaultFinalApplicationDecisionPolicy finalApplicationDecisionPolicy;
@@ -27,7 +30,7 @@ public class MultiModelCoordinator implements AgentModelCoordinator {
     public MultiModelCoordinator() {
         this(
                 new DefaultModelRoutingPolicy(),
-                new SingleModelCoordinator(),
+                new SingleModelCoordinator(ModelChannel.PLANNER),
                 new CodexCodeGenerationService(),
                 new ClaudeCodeAuditService(),
                 new DefaultFinalApplicationDecisionPolicy()
@@ -37,6 +40,8 @@ public class MultiModelCoordinator implements AgentModelCoordinator {
     public MultiModelCoordinator(ModelRoutingPolicy politicaRoteamentoModelos, AgentModelCoordinator coordenadorSingleModel, CodeGenerationService servicoGeracaoCodigo, CodeAuditService servicoAuditoriaCodigo, DefaultFinalApplicationDecisionPolicy finalApplicationDecisionPolicy) {
         this.politicaRoteamentoModelos = politicaRoteamentoModelos;
         this.coordenadorSingleModel = coordenadorSingleModel;
+        this.coordenadorInvestigador = new SingleModelCoordinator(ModelChannel.INVESTIGATOR);
+        this.coordenadorSumarizador = new SingleModelCoordinator(ModelChannel.SUMMARIZER);
         this.servicoGeracaoCodigo = servicoGeracaoCodigo;
         this.servicoAuditoriaCodigo = servicoAuditoriaCodigo != null ? servicoAuditoriaCodigo : new NoOpCodeAuditService();
         this.finalApplicationDecisionPolicy = finalApplicationDecisionPolicy != null ? finalApplicationDecisionPolicy : new DefaultFinalApplicationDecisionPolicy();
@@ -44,7 +49,7 @@ public class MultiModelCoordinator implements AgentModelCoordinator {
 
     @Override
     public AiResponse executarMissao(String selectedCode, String fullFileText, String instrucao, String apiKey) throws Exception {
-        AiResponse respostaInicial = executarFluxoSingleModel(selectedCode, fullFileText, instrucao, apiKey);
+        AiResponse respostaInicial = executarFluxoPlanejamentoOuInvestigacao(selectedCode, fullFileText, instrucao, apiKey);
 
         if (!deveUsarFluxoMultiModelo(respostaInicial)) {
             return respostaInicial;
@@ -61,6 +66,26 @@ public class MultiModelCoordinator implements AgentModelCoordinator {
                 instrucao,
                 apiKey
         );
+    }
+
+
+    private AiResponse executarFluxoPlanejamentoOuInvestigacao(String selectedCode, String fullFileText, String instrucao, String apiKey) throws Exception {
+        if (deveUsarInvestigador(instrucao)) {
+            System.out.println("[MULTI MODEL DEBUG] fluxo=investigator_delegate | channel=INVESTIGATOR | motivo=resultado_de_ferramenta_ou_pedido_investigativo");
+            return coordenadorInvestigador.executarMissao(selectedCode, fullFileText, instrucao, apiKey);
+        }
+
+        System.out.println("[MULTI MODEL DEBUG] fluxo=planner_delegate | channel=PLANNER | motivo=planejamento_inicial");
+        return executarFluxoSingleModel(selectedCode, fullFileText, instrucao, apiKey);
+    }
+
+    private boolean deveUsarInvestigador(String instrucao) {
+        String texto = instrucao != null ? instrucao.toLowerCase() : "";
+        return texto.contains("=== resultado da ferramenta")
+                || texto.contains("execute uma regressao controlada")
+                || texto.contains("checklist obrigatorio")
+                || texto.contains("execute apenas ferramentas de analise")
+                || texto.contains("sem alterar arquivos");
     }
 
     private AiResponse executarFluxoSingleModel(String selectedCode, String fullFileText, String instrucao, String apiKey) throws Exception {
@@ -184,6 +209,45 @@ public class MultiModelCoordinator implements AgentModelCoordinator {
         return montarPerguntaConfirmacaoSemAuditoria(
                 "A auditoria nao convergiu dentro do limite de tentativas. Deseja aplicar mesmo assim e validar pelo workspace Eclipse?"
         );
+    }
+
+
+    private AiResponse tentarSumarizarRespostaFinalNaoMutacional(AiResponse respostaInicial, String selectedCode, String fullFileText, String instrucao, String apiKey) {
+        if (respostaInicial == null || !pareceRespostaFinalNaoMutacional(respostaInicial.getAction())) {
+            return respostaInicial;
+        }
+
+        String texto = instrucao != null ? instrucao.toLowerCase() : "";
+        if (!texto.contains("resposta final obrigatoria")
+                && !texto.contains("resumo geral")
+                && !texto.contains("checklist")) {
+            return respostaInicial;
+        }
+
+        try {
+            StringBuilder promptSumario = new StringBuilder();
+            promptSumario.append(instrucao != null ? instrucao : "");
+            promptSumario.append("\n\n=== RESPOSTA FINAL CANDIDATA PARA SUMARIZACAO ===\n");
+            promptSumario.append("action=").append(respostaInicial.getAction()).append("\n");
+            promptSumario.append("explanation=").append(safeTrim(respostaInicial.getExplanation())).append("\n");
+            promptSumario.append("content=").append(safeTrim(respostaInicial.getContent())).append("\n");
+            promptSumario.append("\nReescreva somente a resposta final ao usuario preservando o protocolo JSON e sem executar novas ferramentas.");
+
+            System.out.println("[MULTI MODEL DEBUG] fluxo=summarizer_delegate | channel=SUMMARIZER | motivo=resposta_final_relatorio");
+            AiResponse respostaSumarizada = coordenadorSumarizador.executarMissao(selectedCode, fullFileText, promptSumario.toString(), apiKey);
+            if (respostaSumarizada != null && pareceRespostaFinalNaoMutacional(respostaSumarizada.getAction())) {
+                return respostaSumarizada;
+            }
+        } catch (Exception e) {
+            System.out.println("[MULTI MODEL DEBUG] fluxo=summarizer_delegate_failed | erro=" + e.getClass().getSimpleName() + " - " + safeTrim(e.getMessage()));
+        }
+
+        return respostaInicial;
+    }
+
+    private boolean pareceRespostaFinalNaoMutacional(String action) {
+        return "responder_ao_usuario".equalsIgnoreCase(action)
+                || "explicar".equalsIgnoreCase(action);
     }
 
     private AiResponse montarPerguntaConfirmacaoSemAuditoria(String pergunta) {

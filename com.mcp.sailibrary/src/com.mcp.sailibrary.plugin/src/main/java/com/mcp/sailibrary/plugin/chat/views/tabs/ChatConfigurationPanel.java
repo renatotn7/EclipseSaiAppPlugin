@@ -11,9 +11,6 @@ import org.eclipse.swt.widgets.Label;
 import com.mcp.sailibrary.plugin.chat.controllers.ChatViewConfigurationController;
 import com.mcp.sailibrary.plugin.chat.settings.ChatRuntimeSettings;
 
-/* --- version: "1.1" libraries: - SWT - GridData - GridLayout - Button - Composite - Group - Label - ChatViewConfigurationController - ChatRuntimeSettings objetivo: "Representar a aba de configuracao da view de chat, deixando a persistencia e defaults sob responsabilidade do controller de configuracao." --- */
-
-/** * Painel da aba de configuracao. * * <p>Esta classe cuida apenas da interface. A persistencia, os defaults e a * interpretacao dos valores ficam no controller.</p> * * @author Renato Tomaz Nati * @since 2026-05-24 */
 public class ChatConfigurationPanel extends Composite {
 
     private ChatViewConfigurationController configurationController;
@@ -23,7 +20,6 @@ public class ChatConfigurationPanel extends Composite {
     private org.eclipse.swt.widgets.Combo comboPerfilRaciocinio;
     private Button btnSalvarConfiguracao;
 
-    /** * Caller: ChatView * Callee: criarConteudo, aplicarConfiguracao * Objetivo: Inicializar a aba de configuracao com o controller dedicado. * Data modificacao: 2026-05-24 00:00 * * @param parent componente pai * @param style estilo SWT * @param configurationController controller de configuracao * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public ChatConfigurationPanel(Composite parent, int style, ChatViewConfigurationController configurationController) {
         super(parent, style);
         this.configurationController = configurationController;
@@ -38,7 +34,6 @@ public class ChatConfigurationPanel extends Composite {
         aplicarConfiguracao(configurationController != null ? configurationController.carregarConfiguracao() : null);
     }
 
-    /** * Caller: construtor * Callee: N/A * Objetivo: Construir os controles visuais da aba. * Data modificacao: 2026-05-24 00:00 * * @author Renato Tomaz Nati * @since 2026-05-24 */
     private void criarConteudo() {
         Group grupoExecucao = new Group(this, SWT.NONE);
         grupoExecucao.setText("Execucao do agente");
@@ -87,7 +82,6 @@ public class ChatConfigurationPanel extends Composite {
         btnSalvarConfiguracao.setLayoutData(new GridData(SWT.LEFT, SWT.CENTER, false, false));
     }
 
-    /** * Caller: ChatView, construtor * Callee: N/A * Objetivo: Aplicar o estado carregado do controller na UI. * Data modificacao: 2026-05-24 00:00 * * @param configuracao configuracao carregada * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void aplicarConfiguracao(ChatRuntimeSettings configuracao) {
         if (configuracao == null) {
             return;
@@ -110,12 +104,10 @@ public class ChatConfigurationPanel extends Composite {
         }
     }
 
-    /** * Caller: ChatView legada, pontos de compatibilidade * Callee: aplicarConfiguracao * Objetivo: Manter compatibilidade semantica com chamadas antigas que * usavam outro nome de metodo. * Data modificacao: 2026-05-24 00:00 * * @param configuracao configuracao carregada * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void aplicarConfiguracaoNaTela(ChatRuntimeSettings configuracao) {
         aplicarConfiguracao(configuracao);
     }
 
-    /** * Caller: ChatView * Callee: N/A * Objetivo: Extrair da UI o estado atual da configuracao. * Data modificacao: 2026-05-24 00:00 * * @return configuracao atual da aba * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public ChatRuntimeSettings extrairConfiguracao() {
         ChatRuntimeSettings configuracao = new ChatRuntimeSettings();
         configuracao.setDebugAtivo(checkDebugConfiguracao != null && checkDebugConfiguracao.getSelection());
@@ -137,7 +129,6 @@ public class ChatConfigurationPanel extends Composite {
         return configuracao;
     }
 
-    /** * Caller: ChatView * Callee: ChatViewConfigurationController.salvarConfiguracao * Objetivo: Capturar o estado da UI e persistir via controller. * Data modificacao: 2026-05-24 00:00 * * @author Renato Tomaz Nati * @since 2026-05-24 */
     public void salvarConfiguracaoAtual() {
         if (configurationController == null) {
             return;
